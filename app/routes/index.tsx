@@ -6,7 +6,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (await getUserId(request)) {
     return redirect("/dashboard");
   }
-  redirect("/login");
+  return redirect("/login");
 }
 export default function Index() {
   return <></>;
