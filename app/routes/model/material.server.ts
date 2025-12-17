@@ -6,56 +6,67 @@ export async function getMaterials(filters: {
   account_name?: string;
   status?: string;
   user?: string;
+  user_real_name?: string;
   startDate?: string;
   endDate?: string;
   viewer?: { username: string; role: string };
   page?: number;
   limit?: number;
+  sort?: string;
 }) {
-  const { page = 1, limit = 10 } = filters;
+  const { page = 1, limit = 10, sort = "created_at" } = filters;
   const offset = (page - 1) * limit;
 
-  let query = "SELECT * FROM materials WHERE 1=1";
-  let countQuery = "SELECT COUNT(*) as count FROM materials WHERE 1=1";
+  let query =
+    "SELECT m.*, u.real_name as user_real_name FROM materials m LEFT JOIN users u ON m.user = u.name WHERE 1=1";
+  let countQuery =
+    "SELECT COUNT(*) as count FROM materials m LEFT JOIN users u ON m.user = u.name WHERE 1=1";
   const params: any[] = [];
 
   if (filters.game_name) {
-    const clause = " AND game_name LIKE ?";
+    const clause = " AND m.game_name LIKE ?";
     query += clause;
     countQuery += clause;
     params.push(`%${filters.game_name}%`);
   }
 
   if (filters.account_name) {
-    const clause = " AND account_name LIKE ?";
+    const clause = " AND m.account_name LIKE ?";
     query += clause;
     countQuery += clause;
     params.push(`%${filters.account_name}%`);
   }
 
   if (filters.status) {
-    const clause = " AND status = ?";
+    const clause = " AND m.status = ?";
     query += clause;
     countQuery += clause;
     params.push(filters.status);
   }
 
   if (filters.user) {
-    const clause = " AND user LIKE ?";
+    const clause = " AND m.user LIKE ?";
     query += clause;
     countQuery += clause;
     params.push(`%${filters.user}%`);
   }
 
+  if (filters.user_real_name) {
+    const clause = " AND u.real_name LIKE ?";
+    query += clause;
+    countQuery += clause;
+    params.push(`%${filters.user_real_name}%`);
+  }
+
   if (filters.startDate) {
-    const clause = " AND usage_time >= ?";
+    const clause = " AND m.usage_time >= ?";
     query += clause;
     countQuery += clause;
     params.push(filters.startDate);
   }
 
   if (filters.endDate) {
-    const clause = " AND usage_time <= ?";
+    const clause = " AND m.usage_time <= ?";
     query += clause;
     countQuery += clause;
     params.push(filters.endDate);
@@ -63,13 +74,14 @@ export async function getMaterials(filters: {
 
   // Visibility Logic
   if (filters.viewer && filters.viewer.role !== "admin") {
-    const clause = " AND (status = '空闲' OR user = ?)";
+    const clause = " AND (m.status = '空闲' OR m.user = ?)";
     query += clause;
     countQuery += clause;
     params.push(filters.viewer.username);
   }
 
-  query += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+  const sortField = sort === "usage_time" ? "m.usage_time" : "m.created_at";
+  query += ` ORDER BY ${sortField} DESC LIMIT ? OFFSET ?`;
 
   const total = (db.prepare(countQuery).get(...params) as { count: number })
     .count;
@@ -110,7 +122,13 @@ export async function claimMaterial(id: number, username: string) {
     throw new Error("Material is already in use");
   }
 
-  const now = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  const date = new Date();
+  const now = date.getFullYear() + "-" +
+    String(date.getMonth() + 1).padStart(2, '0') + "-" +
+    String(date.getDate()).padStart(2, '0') + " " +
+    String(date.getHours()).padStart(2, '0') + ":" +
+    String(date.getMinutes()).padStart(2, '0') + ":" +
+    String(date.getSeconds()).padStart(2, '0');
 
   db.prepare(
     "UPDATE materials SET status = '已使用', user = ?, usage_time = ? WHERE id = ?"

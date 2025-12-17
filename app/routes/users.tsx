@@ -1,7 +1,7 @@
 import { Form, useNavigation, redirect, useSearchParams } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import type { Route } from "./+types/users";
-import { getUsers, createUser, updateUserPassword, getUserById, deleteUser } from "./model/user.server";
+import { getUsers, createUser, updateUserPassword, getUserById, deleteUser, updateUserProfile } from "./model/user.server";
 import { requireUserId } from "./server/session.server";
 import Pagination from "../components/Pagination";
 
@@ -56,12 +56,30 @@ export async function action({ request }: Route.ActionArgs) {
     const email = formData.get("email") as string;
     const password = formData.get("password") as string;
     const role = formData.get("role") as string;
+    const real_name = formData.get("real_name") as string;
 
     if (!name || !email || !password || !role) {
       return { error: "所有字段都是必填的" };
     }
 
-    const result = await createUser(email, password, name, role);
+    const result = await createUser(email, password, name, role, real_name);
+    if (!result.success) {
+      return { error: result.message };
+    }
+    return { success: true };
+  }
+
+  if (intent === "updateProfile") {
+    const userId = formData.get("userId") as string;
+    const name = formData.get("name") as string;
+    const email = formData.get("email") as string;
+    const real_name = formData.get("real_name") as string;
+
+    if (!userId) {
+      return { error: "User ID is required" };
+    }
+
+    const result = await updateUserProfile(userId, { name, email, real_name });
     if (!result.success) {
       return { error: result.message };
     }
@@ -96,18 +114,27 @@ export default function Users({
   const isSubmitting = navigation.state === "submitting";
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editModalUser, setEditModalUser] = useState<{
+    id: number;
+    name: string;
+    email: string;
+    real_name?: string;
+  } | null>(null);
   const [passwordModalUser, setPasswordModalUser] = useState<{
     id: number;
     name: string;
   } | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const editFormRef = useRef<HTMLFormElement>(null);
   const passwordFormRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (actionData?.success) {
       setIsAddModalOpen(false);
+      setEditModalUser(null);
       setPasswordModalUser(null);
       formRef.current?.reset();
+      editFormRef.current?.reset();
       passwordFormRef.current?.reset();
     }
   }, [actionData]);
@@ -212,6 +239,12 @@ export default function Users({
                   scope="col"
                   className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300"
                 >
+                  姓名
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300"
+                >
                   邮箱
                 </th>
                 <th
@@ -244,6 +277,9 @@ export default function Users({
                     {user.name}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+                    {user.real_name || "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
                     {user.email}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2 text-sm">
@@ -261,6 +297,12 @@ export default function Users({
                     {new Date(user.created_at).toLocaleString()}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2 text-right text-sm font-medium">
+                    <button
+                      onClick={() => setEditModalUser(user)}
+                      className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 mr-4"
+                    >
+                      编辑
+                    </button>
                     <button
                       onClick={() => setPasswordModalUser(user)}
                       className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 mr-4"
@@ -357,6 +399,16 @@ export default function Users({
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      姓名
+                    </label>
+                    <input
+                      type="text"
+                      name="real_name"
+                      className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       邮箱
                     </label>
                     <input
@@ -400,6 +452,100 @@ export default function Users({
                     <button
                       type="button"
                       onClick={() => setIsAddModalOpen(false)}
+                      className="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-base font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:col-start-1 sm:mt-0 sm:text-sm"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </Form>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {editModalUser && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-screen items-end justify-center px-4 pb-20 pt-4 text-center sm:block sm:p-0">
+            <div
+              className="fixed inset-0 transition-opacity"
+              aria-hidden="true"
+            >
+              <div
+                className="absolute inset-0 bg-gray-500 opacity-75"
+                onClick={() => setEditModalUser(null)}
+              ></div>
+            </div>
+            <span
+              className="hidden sm:inline-block sm:h-screen sm:align-middle"
+              aria-hidden="true"
+            >
+              &#8203;
+            </span>
+            <div className="relative inline-block transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 text-left align-bottom shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:align-middle">
+              <div className="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">
+                  编辑用户
+                </h3>
+                <Form
+                  method="post"
+                  ref={editFormRef}
+                  className="mt-4 space-y-4"
+                >
+                  <input type="hidden" name="intent" value="updateProfile" />
+                  <input type="hidden" name="userId" value={editModalUser.id} />
+                  {actionData?.error && editModalUser && (
+                    <div className="text-sm text-red-600 dark:text-red-400">
+                      {actionData.error}
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      用户名
+                    </label>
+                    <input
+                      type="text"
+                      name="name"
+                      defaultValue={editModalUser.name}
+                      required
+                      className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      姓名
+                    </label>
+                    <input
+                      type="text"
+                      name="real_name"
+                      defaultValue={editModalUser.real_name || ""}
+                      className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      邮箱
+                    </label>
+                    <input
+                      type="email"
+                      name="email"
+                      defaultValue={editModalUser.email}
+                      required
+                      className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:text-sm"
+                    />
+                  </div>
+                  <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:col-start-2 sm:text-sm disabled:opacity-50"
+                    >
+                      {isSubmitting ? "保存中..." : "保存"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditModalUser(null)}
                       className="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-base font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:col-start-1 sm:mt-0 sm:text-sm"
                     >
                       取消

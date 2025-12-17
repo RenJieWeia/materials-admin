@@ -5,6 +5,7 @@ export interface User {
   id: number;
   email: string;
   name: string;
+  real_name?: string;
   role: string;
   created_at: string;
   updated_at: string;
@@ -41,7 +42,7 @@ export async function getUserById(id: string) {
   const user = db
     .prepare(
       `
-    SELECT id, email, name, role, created_at
+    SELECT id, email, name, real_name, role, created_at
     FROM users
     WHERE id = ?
   `
@@ -54,6 +55,7 @@ export async function getUserById(id: string) {
     id: user.id.toString(),
     email: user.email,
     name: user.name,
+    real_name: user.real_name,
     role: user.role,
     created_at: user.created_at,
   };
@@ -70,7 +72,7 @@ export async function deleteUser(userId: string) {
 
 export async function updateUserProfile(
   userId: string,
-  data: { name?: string; email?: string }
+  data: { name?: string; email?: string; real_name?: string }
 ) {
   const updateFields = [];
   const values: any[] = [];
@@ -83,6 +85,11 @@ export async function updateUserProfile(
   if (data.email) {
     updateFields.push("email = ?");
     values.push(data.email);
+  }
+
+  if (data.real_name !== undefined) {
+    updateFields.push("real_name = ?");
+    values.push(data.real_name);
   }
 
   if (updateFields.length === 0) {
@@ -113,7 +120,8 @@ export async function createUser(
   email: string,
   password: string,
   name: string,
-  role: string = "user"
+  role: string = "user",
+  real_name?: string
 ) {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -121,11 +129,11 @@ export async function createUser(
     const result = db
       .prepare(
         `
-      INSERT INTO users (email, password, name, role)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO users (email, password, name, role, real_name)
+      VALUES (?, ?, ?, ?, ?)
     `
       )
-      .run(email, hashedPassword, name, role);
+      .run(email, hashedPassword, name, role, real_name || null);
 
     return {
       success: true,
@@ -162,7 +170,8 @@ export async function getUsers(options: {
   const { name, email, role, page = 1, limit = 10 } = options;
   const offset = (page - 1) * limit;
 
-  let query = "SELECT id, email, name, role, created_at FROM users WHERE 1=1";
+  let query =
+    "SELECT id, email, name, real_name, role, created_at FROM users WHERE 1=1";
   let countQuery = "SELECT COUNT(*) as count FROM users WHERE 1=1";
   const params: any[] = [];
 

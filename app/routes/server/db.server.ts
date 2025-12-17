@@ -44,6 +44,7 @@ db.exec(`
     password TEXT NOT NULL,
     role TEXT DEFAULT 'user' NOT NULL,
     name TEXT NOT NULL,
+    real_name TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -80,6 +81,17 @@ db.exec(`
     UNIQUE(user_id, date)
   );
 `);
+
+// Migration: Add real_name column if it doesn't exist
+try {
+  const tableInfo = db.pragma("table_info(users)") as any[];
+  const hasRealName = tableInfo.some((col) => col.name === "real_name");
+  if (!hasRealName) {
+    db.prepare("ALTER TABLE users ADD COLUMN real_name TEXT").run();
+  }
+} catch (error) {
+  console.error("Migration failed:", error);
+}
 
 // 插入示例数据（如果表是空的）
 const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as {

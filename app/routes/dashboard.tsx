@@ -183,8 +183,8 @@ export default function Dashboard({
             <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
               全平台近7日趋势
             </h2>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-80 w-full min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <BarChart data={adminData.chartData}>
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -229,8 +229,8 @@ export default function Dashboard({
             <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
               账号状态分布
             </h2>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-80 w-full min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <PieChart>
                   <Pie
                     data={adminData.statusStats}
@@ -273,8 +273,8 @@ export default function Dashboard({
             <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
               转化榜 Top 5 (近7日)
             </h2>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-64 w-full min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <BarChart layout="vertical" data={adminData.topUsersConversion}>
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -313,8 +313,8 @@ export default function Dashboard({
             <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
               勤奋榜 Top 5 (近7日)
             </h2>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-64 w-full min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <BarChart layout="vertical" data={adminData.topUsersUsage}>
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -401,8 +401,8 @@ export default function Dashboard({
           <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
             近7日转化趋势
           </h2>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-80 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <BarChart data={chartData}>
                 <CartesianGrid
                   strokeDasharray="3 3"
@@ -447,8 +447,8 @@ export default function Dashboard({
           <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
             近7日转化率趋势
           </h2>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-80 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <LineChart data={chartData}>
                 <CartesianGrid
                   strokeDasharray="3 3"

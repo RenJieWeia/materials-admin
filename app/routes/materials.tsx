@@ -21,8 +21,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   const account_name = url.searchParams.get("account_name") || undefined;
   const status = url.searchParams.get("status") || undefined;
   const filterUser = url.searchParams.get("user") || undefined;
+  const filterUserRealName = url.searchParams.get("user_real_name") || undefined;
   const startDate = url.searchParams.get("startDate") || undefined;
   const endDate = url.searchParams.get("endDate") || undefined;
+  const sort = url.searchParams.get("sort") || "created_at";
   const page = parseInt(url.searchParams.get("page") || "1");
   const limit = parseInt(url.searchParams.get("limit") || "10");
 
@@ -31,11 +33,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     account_name,
     status,
     user: filterUser,
+    user_real_name: filterUserRealName,
     startDate,
     endDate,
     viewer: { username: user.name, role: user.role },
     page,
     limit,
+    sort,
   });
   return {
     ...data,
@@ -44,8 +48,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       account_name,
       status,
       user: filterUser,
+      user_real_name: filterUserRealName,
       startDate,
       endDate,
+      sort,
     },
     user: { id: user.id, name: user.name, role: user.role },
   };
@@ -245,6 +251,21 @@ export default function Materials({
           </div>
           <div className="flex-1 min-w-[200px]">
             <label
+              htmlFor="user_real_name"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+            >
+              使用人姓名
+            </label>
+            <input
+              type="text"
+              name="user_real_name"
+              defaultValue={filters.user_real_name}
+              placeholder="搜索使用人姓名..."
+              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <label
               htmlFor="startDate"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
             >
@@ -286,6 +307,22 @@ export default function Materials({
               <option value="">全部</option>
               <option value="空闲">空闲</option>
               <option value="已使用">已使用</option>
+            </select>
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <label
+              htmlFor="sort"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+            >
+              排序
+            </label>
+            <select
+              name="sort"
+              defaultValue={filters.sort || "created_at"}
+              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="created_at">创建时间 (默认)</option>
+              <option value="usage_time">使用时间</option>
             </select>
           </div>
           <div className="flex items-end">
@@ -338,12 +375,6 @@ export default function Materials({
                   scope="col"
                   className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300"
                 >
-                  描述
-                </th>
-                <th
-                  scope="col"
-                  className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                >
                   使用状态
                 </th>
                 <th
@@ -351,6 +382,12 @@ export default function Materials({
                   className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300"
                 >
                   使用人
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300"
+                >
+                  使用人姓名
                 </th>
                 <th
                   scope="col"
@@ -389,9 +426,6 @@ export default function Materials({
                         material.account_name
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
-                      {material.description || "-"}
-                    </td>
                     <td className="whitespace-nowrap px-4 py-2 text-sm">
                       <span
                         className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
@@ -405,6 +439,9 @@ export default function Materials({
                     </td>
                     <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
                       {material.user || "-"}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+                      {material.user_real_name || "-"}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
                       {material.usage_time || "-"}
