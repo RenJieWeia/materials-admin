@@ -6,7 +6,8 @@ const sessionSecret =
 const storage = createCookieSessionStorage({
   cookie: {
     name: "auth_session",
-    secure: process.env.NODE_ENV === "production",
+    // Only set secure if explicitly enabled or in production with HTTPS configured
+    secure: process.env.NODE_ENV === "production" && process.env.SECURE_COOKIES === "true",
     secrets: [sessionSecret],
     sameSite: "lax",
     path: "/",
