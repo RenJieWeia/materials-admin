@@ -125,9 +125,19 @@ export default function Materials({
 
   useEffect(() => {
     if (fetcher.data?.success && fetcher.data?.claimedAccount) {
-      navigator.clipboard.writeText(fetcher.data.claimedAccount).then(() => {
-        alert(`账号 ${fetcher.data.claimedAccount} 已复制到剪贴板`);
-      });
+      const account = fetcher.data.claimedAccount;
+      // Check if clipboard API is available (requires secure context like HTTPS or localhost)
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(account).then(() => {
+          alert(`账号 ${account} 已复制到剪贴板`);
+        }).catch((err) => {
+          console.error("Clipboard write failed", err);
+          alert(`领取成功！账号: ${account}`);
+        });
+      } else {
+        // Fallback for non-secure contexts
+        alert(`领取成功！账号: ${account}`);
+      }
     } else if (fetcher.data?.error) {
       alert(fetcher.data.error);
     }
