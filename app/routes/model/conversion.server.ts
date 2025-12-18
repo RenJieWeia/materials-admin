@@ -32,6 +32,15 @@ export async function getConversion(userId: number, date: string) {
   return stmt.get(userId, date) as DailyConversion | undefined;
 }
 
+export async function getSystemTotalConversion(date: string) {
+  const stmt = db.prepare(`
+    SELECT SUM(count) as count FROM daily_conversions
+    WHERE date = ?
+  `);
+  const result = stmt.get(date) as { count: number } | undefined;
+  return result?.count || 0;
+}
+
 export async function getConversions(
   userId: number,
   startDate?: string,
@@ -88,4 +97,39 @@ export async function getTopUsersByConversion(
     user: string;
     count: number;
   }[];
+}
+
+export async function getAllUserConversions(
+  startDate?: string,
+  endDate?: string
+) {
+  let query = `
+    SELECT dc.*, u.name as user_name, u.real_name
+    FROM daily_conversions dc
+    JOIN users u ON dc.user_id = u.id
+  `;
+  const params: any[] = [];
+
+  const conditions = [];
+  if (startDate) {
+    conditions.push(`dc.date >= ?`);
+    params.push(startDate);
+  }
+
+  if (endDate) {
+    conditions.push(`dc.date <= ?`);
+    params.push(endDate);
+  }
+
+  if (conditions.length > 0) {
+    query += ` WHERE ` + conditions.join(" AND ");
+  }
+
+  query += ` ORDER BY dc.date DESC, dc.updated_at DESC`;
+
+  const stmt = db.prepare(query);
+  return stmt.all(...params) as (DailyConversion & {
+    user_name: string;
+    real_name?: string;
+  })[];
 }

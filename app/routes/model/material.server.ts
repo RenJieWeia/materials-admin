@@ -255,6 +255,26 @@ export async function getTodayUsageCount(username: string) {
   return result.count;
 }
 
+export async function getUsageCountByDate(username: string, date: string) {
+  const query = `
+    SELECT COUNT(*) as count
+    FROM materials
+    WHERE user = ? AND usage_time = ?
+  `;
+  const result = db.prepare(query).get(username, date) as { count: number };
+  return result.count;
+}
+
+export async function getSystemUsageCountByDate(date: string) {
+  const query = `
+    SELECT COUNT(*) as count
+    FROM materials
+    WHERE usage_time = ?
+  `;
+  const result = db.prepare(query).get(date) as { count: number };
+  return result.count;
+}
+
 export async function getAllMaterialUsageStats(
   startDate: string,
   endDate: string

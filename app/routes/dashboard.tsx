@@ -4,6 +4,7 @@ import {
   useActionData,
   useNavigation,
   isRouteErrorResponse,
+  Link,
 } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import type { Route } from "./+types/dashboard";
@@ -15,6 +16,7 @@ import {
   getConversions,
   getAllConversions,
   getTopUsersByConversion,
+  getSystemTotalConversion,
 } from "./model/conversion.server";
 import {
   getMaterialUsageStats,
@@ -22,6 +24,8 @@ import {
   getAllMaterialUsageStats,
   getMaterialStatusStats,
   getTopUsersByUsage,
+  getUsageCountByDate,
+  getSystemUsageCountByDate,
 } from "./model/material.server";
 import {
   LineChart,
@@ -37,7 +41,22 @@ import {
   PieChart,
   Pie,
   Cell,
+  AreaChart,
+  Area,
 } from "recharts";
+import {
+  ChartBarIcon,
+  ComputerDesktopIcon,
+  PresentationChartLineIcon,
+  UserGroupIcon,
+  TrophyIcon,
+  FireIcon,
+  ArrowTrendingUpIcon,
+  PlusIcon,
+  ArrowTrendingDownIcon,
+  ClockIcon,
+  ListBulletIcon,
+} from "@heroicons/react/24/outline";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireUserId(request);
@@ -47,19 +66,26 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const today = new Date().toISOString().split("T")[0];
-  const todayConversion = await getConversion(Number(userId), today);
-  const todayUsageCount = await getTodayUsageCount(user.name);
+  const yesterdayObj = new Date();
+  yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+  const yesterday = yesterdayObj.toISOString().split("T")[0];
 
-  // Calculate date range for last 7 days
+  // Common Data
+  const todayConversion = await getConversion(Number(userId), today);
+  const yesterdayConversion = await getConversion(Number(userId), yesterday);
+  const todayUsageCount = await getTodayUsageCount(user.name);
+  const yesterdayUsageCount = await getUsageCountByDate(user.name, yesterday);
+
+  // Calculate date range for last 30 days for better trend analysis
   const endDate = today;
   const startDateObj = new Date();
-  startDateObj.setDate(startDateObj.getDate() - 6);
+  startDateObj.setDate(startDateObj.getDate() - 29);
   const startDate = startDateObj.toISOString().split("T")[0];
 
   const conversions = await getConversions(Number(userId), startDate, endDate);
   const usageStats = await getMaterialUsageStats(user.name, startDate, endDate);
 
-  // Merge data
+  // Merge data for charts
   const chartData = [];
   for (
     let d = new Date(startDateObj);
@@ -79,6 +105,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
+  // Recent Activity (Last 5 conversions)
+  const recentConversions = conversions.slice(0, 5);
+
   let adminData = null;
   if (user.role === "admin") {
     const allUsage = await getAllMaterialUsageStats(startDate, endDate);
@@ -89,6 +118,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       startDate,
       endDate
     );
+
+    // System Totals
+    const systemTodayConversion = await getSystemTotalConversion(today);
+    const systemYesterdayConversion = await getSystemTotalConversion(yesterday);
+    const systemTodayUsage = await getSystemUsageCountByDate(today);
+    const systemYesterdayUsage = await getSystemUsageCountByDate(yesterday);
 
     const adminChartData = [];
     for (
@@ -114,15 +149,22 @@ export async function loader({ request }: Route.LoaderArgs) {
       statusStats,
       topUsersUsage,
       topUsersConversion,
+      systemTodayConversion,
+      systemYesterdayConversion,
+      systemTodayUsage,
+      systemYesterdayUsage,
     };
   }
 
   return {
     user,
     todayConversion,
+    yesterdayConversion,
     today,
     todayUsageCount,
+    yesterdayUsageCount,
     chartData,
+    recentConversions,
     adminData,
   };
 }
@@ -146,6 +188,24 @@ export async function action({ request }: Route.ActionArgs) {
   return null;
 }
 
+function TrendIndicator({ current, previous }: { current: number; previous: number }) {
+  if (previous === 0) return <span className="text-slate-400 text-xs">无昨日数据</span>;
+  const diff = current - previous;
+  const percent = ((diff / previous) * 100).toFixed(1);
+  const isPositive = diff > 0;
+  const isZero = diff === 0;
+
+  if (isZero) return <span className="text-slate-500 text-xs font-medium">与昨日持平</span>;
+
+  return (
+    <div className={`flex items-center text-xs font-medium ${isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+      {isPositive ? <ArrowTrendingUpIcon className="w-3 h-3 mr-1" /> : <ArrowTrendingDownIcon className="w-3 h-3 mr-1" />}
+      <span>{Math.abs(Number(percent))}%</span>
+      <span className="ml-1 text-slate-400">较昨日</span>
+    </div>
+  );
+}
+
 export default function Dashboard({
   loaderData,
   actionData,
@@ -153,9 +213,12 @@ export default function Dashboard({
   const {
     user,
     todayConversion,
+    yesterdayConversion,
     today,
     todayUsageCount,
+    yesterdayUsageCount,
     chartData,
+    recentConversions,
     adminData,
   } = loaderData;
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -170,65 +233,139 @@ export default function Dashboard({
     }
   }, [actionData]);
 
-  const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8"];
+  // Professional Business Palette
+  const COLORS = ["#2563eb", "#0d9488", "#d97706", "#4f46e5", "#be123c"];
 
   if (user.role === "admin" && adminData) {
     return (
-      <div className="p-4 container mx-auto text-gray-800 dark:text-white">
-        <h1 className="text-2xl font-bold mb-6">管理工作台</h1>
+      <div className="p-8 container mx-auto text-slate-800 dark:text-slate-200 space-y-8 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+              管理工作台
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              全平台数据概览与分析
+            </p>
+          </div>
+          <div className="text-sm font-medium px-4 py-2 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
+            {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+          </div>
+        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Admin KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">今日总转化</p>
+                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-2 tracking-tight">{adminData.systemTodayConversion}</h3>
+              </div>
+              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ChartBarIcon className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              </div>
+            </div>
+            <TrendIndicator current={adminData.systemTodayConversion} previous={adminData.systemYesterdayConversion} />
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">今日总使用</p>
+                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-2 tracking-tight">{adminData.systemTodayUsage}</h3>
+              </div>
+              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ComputerDesktopIcon className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              </div>
+            </div>
+            <TrendIndicator current={adminData.systemTodayUsage} previous={adminData.systemYesterdayUsage} />
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">今日转化率</p>
+                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-2 tracking-tight">
+                  {adminData.systemTodayUsage > 0 
+                    ? ((adminData.systemTodayConversion / adminData.systemTodayUsage) * 100).toFixed(1) 
+                    : 0}%
+                </h3>
+              </div>
+              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ArrowTrendingUpIcon className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              </div>
+            </div>
+            <div className="text-xs text-slate-500">全平台平均水平</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">活跃账号数</p>
+                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-2 tracking-tight">
+                  {adminData.statusStats.reduce((acc: number, curr: any) => acc + curr.count, 0)}
+                </h3>
+              </div>
+              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <UserGroupIcon className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              </div>
+            </div>
+            <div className="text-xs text-slate-500">系统总登记账号</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Global Trend */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
-              全平台近7日趋势
-            </h2>
+          <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center">
+                <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+                  全平台趋势分析 (30天)
+                </h2>
+              </div>
+            </div>
             <div className="h-80 w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart data={adminData.chartData}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="#374151"
-                    opacity={0.1}
-                  />
-                  <XAxis
-                    dataKey="date"
-                    stroke="#6B7280"
-                    fontSize={12}
-                    tickFormatter={(val) => val.slice(5)}
-                  />
-                  <YAxis stroke="#6B7280" fontSize={12} />
+                <AreaChart data={adminData.chartData}>
+                  <defs>
+                    <linearGradient id="colorConversion" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorUsage" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0d9488" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#0d9488" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickFormatter={(val) => val.slice(5)} tickLine={false} axisLine={false} dy={10} />
+                  <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#1F2937",
-                      borderColor: "#374151",
-                      color: "#F3F4F6",
+                      backgroundColor: "#1e293b",
+                      borderColor: "#334155",
+                      color: "#f8fafc",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #334155",
+                      boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
                     }}
-                    itemStyle={{ color: "#F3F4F6" }}
+                    itemStyle={{ color: "#f8fafc" }}
                   />
-                  <Legend />
-                  <Bar
-                    dataKey="conversion"
-                    name="总转化数"
-                    fill="#3B82F6"
-                    radius={[4, 4, 0, 0]}
-                  />
-                  <Bar
-                    dataKey="usage"
-                    name="总账号使用"
-                    fill="#10B981"
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
+                  <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                  <Area type="monotone" dataKey="conversion" name="总转化数" stroke="#2563eb" strokeWidth={2} fillOpacity={1} fill="url(#colorConversion)" />
+                  <Area type="monotone" dataKey="usage" name="总账号使用" stroke="#0d9488" strokeWidth={2} fillOpacity={1} fill="url(#colorUsage)" />
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           </div>
 
           {/* Material Status Distribution */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
-              账号状态分布
-            </h2>
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center mb-6">
+              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+                账号状态分布
+              </h2>
+            </div>
             <div className="h-80 w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <PieChart>
@@ -236,12 +373,9 @@ export default function Dashboard({
                     data={adminData.statusStats}
                     cx="50%"
                     cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) =>
-                      `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`
-                    }
+                    innerRadius={60}
                     outerRadius={80}
-                    fill="#8884d8"
+                    paddingAngle={5}
                     dataKey="count"
                     nameKey="status"
                   >
@@ -249,18 +383,26 @@ export default function Dashboard({
                       <Cell
                         key={`cell-${index}`}
                         fill={COLORS[index % COLORS.length]}
+                        strokeWidth={0}
                       />
                     ))}
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#1F2937",
-                      borderColor: "#374151",
-                      color: "#F3F4F6",
+                      backgroundColor: "#1e293b",
+                      borderColor: "#334155",
+                      color: "#f8fafc",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #334155"
                     }}
-                    itemStyle={{ color: "#F3F4F6" }}
+                    itemStyle={{ color: "#f8fafc" }}
                   />
-                  <Legend />
+                  <Legend 
+                    layout="vertical" 
+                    verticalAlign="middle" 
+                    align="center"
+                    wrapperStyle={{ paddingTop: '20px' }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -269,80 +411,66 @@ export default function Dashboard({
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Top Users by Conversion */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
-              转化榜 Top 5 (近7日)
-            </h2>
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center mb-6">
+              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600 mr-3">
+                <TrophyIcon className="w-5 h-5 text-amber-500" />
+              </div>
+              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+                转化榜 Top 5
+              </h2>
+            </div>
             <div className="h-64 w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart layout="vertical" data={adminData.topUsersConversion}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="#374151"
-                    opacity={0.1}
-                  />
-                  <XAxis type="number" stroke="#6B7280" fontSize={12} />
-                  <YAxis
-                    dataKey="user"
-                    type="category"
-                    stroke="#6B7280"
-                    fontSize={12}
-                    width={80}
-                  />
+                <BarChart layout="vertical" data={adminData.topUsersConversion} margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                  <XAxis type="number" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis dataKey="user" type="category" stroke="#64748b" fontSize={12} width={80} tickLine={false} axisLine={false} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#1F2937",
-                      borderColor: "#374151",
-                      color: "#F3F4F6",
+                      backgroundColor: "#1e293b",
+                      borderColor: "#334155",
+                      color: "#f8fafc",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #334155"
                     }}
-                    itemStyle={{ color: "#F3F4F6" }}
+                    itemStyle={{ color: "#f8fafc" }}
+                    cursor={{ fill: '#f1f5f9' }}
                   />
-                  <Bar
-                    dataKey="count"
-                    name="转化数"
-                    fill="#8B5CF6"
-                    radius={[0, 4, 4, 0]}
-                  />
+                  <Bar dataKey="count" name="转化数" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={20} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
 
           {/* Top Users by Usage */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
-              勤奋榜 Top 5 (近7日)
-            </h2>
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center mb-6">
+              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600 mr-3">
+                <FireIcon className="w-5 h-5 text-rose-500" />
+              </div>
+              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+                勤奋榜 Top 5
+              </h2>
+            </div>
             <div className="h-64 w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart layout="vertical" data={adminData.topUsersUsage}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="#374151"
-                    opacity={0.1}
-                  />
-                  <XAxis type="number" stroke="#6B7280" fontSize={12} />
-                  <YAxis
-                    dataKey="user"
-                    type="category"
-                    stroke="#6B7280"
-                    fontSize={12}
-                    width={80}
-                  />
+                <BarChart layout="vertical" data={adminData.topUsersUsage} margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                  <XAxis type="number" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis dataKey="user" type="category" stroke="#64748b" fontSize={12} width={80} tickLine={false} axisLine={false} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#1F2937",
-                      borderColor: "#374151",
-                      color: "#F3F4F6",
+                      backgroundColor: "#1e293b",
+                      borderColor: "#334155",
+                      color: "#f8fafc",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #334155"
                     }}
-                    itemStyle={{ color: "#F3F4F6" }}
+                    itemStyle={{ color: "#f8fafc" }}
+                    cursor={{ fill: '#f1f5f9' }}
                   />
-                  <Bar
-                    dataKey="count"
-                    name="账号使用数"
-                    fill="#F59E0B"
-                    radius={[0, 4, 4, 0]}
-                  />
+                  <Bar dataKey="count" name="账号使用数" fill="#d97706" radius={[0, 4, 4, 0]} barSize={20} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -353,43 +481,118 @@ export default function Dashboard({
   }
 
   return (
-    <div className="p-4 container mx-auto text-gray-800 dark:text-white">
-      <h1 className="text-2xl font-bold mb-6">工作台</h1>
+    <div className="p-8 container mx-auto text-slate-800 dark:text-slate-200 space-y-8 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
+      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+            工作台
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            欢迎回来，{user.username}
+          </p>
+        </div>
+        <div className="text-sm font-medium px-4 py-2 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
+          {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+        </div>
+      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {/* Conversion Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold mb-2 text-gray-700 dark:text-gray-300">
-            今日转化
-          </h2>
-          <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-4">
-            {todayConversion?.count || 0}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Today Conversion Card */}
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+            <ChartBarIcon className="w-24 h-24 text-slate-400" />
           </div>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
-          >
-            转化登记
-          </button>
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-slate-700 dark:text-slate-300">
+                今日转化
+              </h2>
+              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ChartBarIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              </div>
+            </div>
+            <div className="text-4xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
+              {todayConversion?.count || 0}
+            </div>
+            <TrendIndicator current={todayConversion?.count || 0} previous={yesterdayConversion?.count || 0} />
+            
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 shadow-sm hover:shadow-md active:scale-[0.98]"
+            >
+              <PlusIcon className="w-5 h-5" />
+              <span>转化登记</span>
+            </button>
+          </div>
         </div>
 
         {/* Today Usage Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold mb-2 text-gray-700 dark:text-gray-300">
-            今日账号使用
-          </h2>
-          <div className="text-3xl font-bold text-green-600 dark:text-green-400 mb-4">
-            {todayUsageCount}
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+            <ComputerDesktopIcon className="w-24 h-24 text-slate-400" />
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
-            今日转化率:{" "}
-            {todayUsageCount > 0
-              ? (
-                  ((todayConversion?.count || 0) / todayUsageCount) *
-                  100
-                ).toFixed(1)
-              : 0}
-            %
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-slate-700 dark:text-slate-300">
+                今日账号使用
+              </h2>
+              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ComputerDesktopIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+            </div>
+            <div className="text-4xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
+              {todayUsageCount}
+            </div>
+            <TrendIndicator current={todayUsageCount} previous={yesterdayUsageCount} />
+
+            <div className="mt-6 flex items-center text-sm text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/30 p-2.5 rounded-md border border-slate-100 dark:border-slate-700">
+              <ArrowTrendingUpIcon className="w-4 h-4 mr-2 text-slate-400" />
+              <span>今日转化率: </span>
+              <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
+                {todayUsageCount > 0
+                  ? (((todayConversion?.count || 0) / todayUsageCount) * 100).toFixed(1)
+                  : 0}
+                %
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Activity Card */}
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700 relative overflow-hidden">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-slate-700 dark:text-slate-300">
+              近期动态
+            </h2>
+            <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+              <ClockIcon className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+            </div>
+          </div>
+          <div className="space-y-4">
+            {recentConversions.length > 0 ? (
+              recentConversions.slice(0, 3).map((conv: any, idx: number) => (
+                <div key={idx} className="flex items-center justify-between text-sm border-b border-slate-100 dark:border-slate-700/50 pb-3 last:border-0 last:pb-0">
+                  <div className="flex items-center text-slate-600 dark:text-slate-300">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 mr-3"></div>
+                    <span>转化登记</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium text-slate-900 dark:text-white">+{conv.count}</span>
+                    <span className="text-xs text-slate-400">{new Date(conv.date).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-slate-400 text-center py-4">暂无近期记录</div>
+            )}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
+               <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">近30日总转化</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {chartData.reduce((acc: number, curr: any) => acc + curr.conversion, 0)}
+                  </span>
+               </div>
+            </div>
           </div>
         </div>
       </div>
@@ -397,88 +600,71 @@ export default function Dashboard({
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Conversion Trend */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
-            近7日转化趋势
-          </h2>
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center mb-6">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+              近30日转化趋势
+            </h2>
+          </div>
           <div className="h-80 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-              <BarChart data={chartData}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="#374151"
-                  opacity={0.1}
-                />
-                <XAxis
-                  dataKey="date"
-                  stroke="#6B7280"
-                  fontSize={12}
-                  tickFormatter={(val) => val.slice(5)}
-                />
-                <YAxis stroke="#6B7280" fontSize={12} />
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="colorUserConversion" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorUserUsage" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0d9488" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#0d9488" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickFormatter={(val) => val.slice(5)} tickLine={false} axisLine={false} dy={10} />
+                <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "#1F2937",
-                    borderColor: "#374151",
-                    color: "#F3F4F6",
+                    backgroundColor: "#1e293b",
+                    borderColor: "#334155",
+                    color: "#f8fafc",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #334155"
                   }}
-                  itemStyle={{ color: "#F3F4F6" }}
+                  itemStyle={{ color: "#f8fafc" }}
                 />
-                <Legend />
-                <Bar
-                  dataKey="conversion"
-                  name="转化数"
-                  fill="#3B82F6"
-                  radius={[4, 4, 0, 0]}
-                />
-                <Bar
-                  dataKey="usage"
-                  name="账号使用数"
-                  fill="#10B981"
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
+                <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                <Area type="monotone" dataKey="conversion" name="转化数" stroke="#2563eb" strokeWidth={2} fillOpacity={1} fill="url(#colorUserConversion)" />
+                <Area type="monotone" dataKey="usage" name="账号使用数" stroke="#0d9488" strokeWidth={2} fillOpacity={1} fill="url(#colorUserUsage)" />
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* Conversion Rate Trend */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-300">
-            近7日转化率趋势
-          </h2>
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center mb-6">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+              近30日转化率趋势
+            </h2>
+          </div>
           <div className="h-80 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <LineChart data={chartData}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="#374151"
-                  opacity={0.1}
-                />
-                <XAxis
-                  dataKey="date"
-                  stroke="#6B7280"
-                  fontSize={12}
-                  tickFormatter={(val) => val.slice(5)}
-                />
-                <YAxis stroke="#6B7280" fontSize={12} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickFormatter={(val) => val.slice(5)} tickLine={false} axisLine={false} dy={10} />
+                <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "#1F2937",
-                    borderColor: "#374151",
-                    color: "#F3F4F6",
+                    backgroundColor: "#1e293b",
+                    borderColor: "#334155",
+                    color: "#f8fafc",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #334155"
                   }}
-                  itemStyle={{ color: "#F3F4F6" }}
+                  itemStyle={{ color: "#f8fafc" }}
                 />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="rate"
-                  name="转化率"
-                  stroke="#8B5CF6"
-                  strokeWidth={2}
-                  dot={{ r: 4 }}
-                />
+                <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                <Line type="monotone" dataKey="rate" name="转化率" stroke="#4f46e5" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6, strokeWidth: 0 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -494,7 +680,7 @@ export default function Dashboard({
               aria-hidden="true"
             >
               <div
-                className="absolute inset-0 bg-gray-500 opacity-75"
+                className="absolute inset-0 bg-slate-900/75 backdrop-blur-sm transition-opacity"
                 onClick={() => setIsModalOpen(false)}
               ></div>
             </div>
@@ -504,9 +690,9 @@ export default function Dashboard({
             >
               &#8203;
             </span>
-            <div className="relative inline-block transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 text-left align-bottom shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-sm sm:align-middle">
-              <div className="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
-                <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white mb-4">
+            <div className="relative inline-block transform overflow-hidden rounded-lg bg-white dark:bg-slate-800 text-left align-bottom shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-sm sm:align-middle border border-slate-200 dark:border-slate-700">
+              <div className="bg-white dark:bg-slate-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                <h3 className="text-lg font-bold leading-6 text-slate-900 dark:text-white mb-6">
                   登记今日转化 ({today})
                 </h3>
                 <Form method="post" ref={formRef}>
@@ -515,10 +701,10 @@ export default function Dashboard({
                     name="intent"
                     value="record_conversion"
                   />
-                  <div className="mb-4">
+                  <div className="mb-6">
                     <label
                       htmlFor="count"
-                      className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                      className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
                     >
                       转化数量
                     </label>
@@ -529,11 +715,12 @@ export default function Dashboard({
                       defaultValue={todayConversion?.count}
                       min="0"
                       required
-                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700/50 text-slate-900 dark:text-white px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      placeholder="请输入数量"
                     />
                   </div>
                   {actionData?.error && (
-                    <div className="mb-4 text-sm text-red-600 dark:text-red-400">
+                    <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-900/20 text-sm text-rose-600 dark:text-rose-400 rounded-md">
                       {actionData.error}
                     </div>
                   )}
@@ -541,14 +728,14 @@ export default function Dashboard({
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:col-start-2 sm:text-sm disabled:opacity-50"
+                      className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:col-start-2 sm:text-sm disabled:opacity-50 transition-colors"
                     >
                       {isSubmitting ? "保存中..." : "保存"}
                     </button>
                     <button
                       type="button"
                       onClick={() => setIsModalOpen(false)}
-                      className="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-base font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:col-start-1 sm:mt-0 sm:text-sm"
+                      className="mt-3 inline-flex w-full justify-center rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-4 py-2 text-base font-medium text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:col-start-1 sm:mt-0 sm:text-sm transition-colors"
                     >
                       取消
                     </button>

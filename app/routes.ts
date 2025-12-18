@@ -13,6 +13,7 @@ export default [
     route("dashboard", "routes/dashboard.tsx"),
     route("materials", "routes/materials.tsx"),
     route("users", "routes/users.tsx"),
+    route("conversions", "routes/conversions.tsx"),
   ]),
   route("resources/material-template", "routes/resources/material-template.ts"),
 ] satisfies RouteConfig;

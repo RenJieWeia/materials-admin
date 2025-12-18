@@ -16,25 +16,48 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <div className="flex h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
-      <aside className="w-64 flex-shrink-0 bg-white dark:bg-gray-800 shadow-md border-r border-gray-200 dark:border-gray-700">
-        <div className="flex h-16 items-center justify-center border-b border-gray-200 dark:border-gray-700 px-6">
-          <h1 className="text-xl font-bold text-gray-800 dark:text-white">Material Admin</h1>
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200 font-sans">
+      <aside className="w-64 flex-shrink-0 bg-white dark:bg-slate-800 shadow-sm border-r border-slate-200 dark:border-slate-700 z-10 flex flex-col">
+        <div className="flex h-16 items-center px-6 border-b border-slate-100 dark:border-slate-700/50">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-sm">
+              <span className="text-white font-bold text-lg">M</span>
+            </div>
+            <h1 className="text-lg font-bold text-slate-800 dark:text-white tracking-tight">Material Admin</h1>
+          </div>
         </div>
-        <nav className="p-4">
-          <ul className="space-y-2">
+        
+        <nav className="flex-1 p-4 overflow-y-auto">
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4 px-2">Menu</div>
+          <ul className="space-y-1">
             <li>
               <NavLink
                 to="/dashboard"
                 className={({ isActive }) =>
-                  `block rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                  `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-200 ${
                     isActive
-                      ? "bg-blue-600 text-white"
-                      : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-700 dark:text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-200"
                   }`
                 }
               >
+                <span className={`w-1.5 h-1.5 rounded-full ${({ isActive }: any) => isActive ? 'bg-blue-600' : 'bg-slate-400'} opacity-70`}></span>
                 工作台
+              </NavLink>
+            </li>
+            <li>
+              <NavLink
+                to="/conversions"
+                className={({ isActive }) =>
+                  `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-200 ${
+                    isActive
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-700 dark:text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-200"
+                  }`
+                }
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${({ isActive }: any) => isActive ? 'bg-blue-600' : 'bg-slate-400'} opacity-70`}></span>
+                转化记录
               </NavLink>
             </li>
             {user?.role === "admin" && (
@@ -42,13 +65,14 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
                 <NavLink
                   to="/users"
                   className={({ isActive }) =>
-                    `block rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                    `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-200 ${
                       isActive
-                        ? "bg-blue-600 text-white"
-                        : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
+                        ? "bg-slate-100 text-slate-900 dark:bg-slate-700 dark:text-white shadow-sm"
+                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-200"
                     }`
                   }
                 >
+                  <span className={`w-1.5 h-1.5 rounded-full ${({ isActive }: any) => isActive ? 'bg-blue-600' : 'bg-slate-400'} opacity-70`}></span>
                   账户管理
                 </NavLink>
               </li>
@@ -57,45 +81,64 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
               <NavLink
                 to="/materials"
                 className={({ isActive }) =>
-                  `block rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                  `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-200 ${
                     isActive
-                      ? "bg-blue-600 text-white"
-                      : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-700 dark:text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-200"
                   }`
                 }
               >
+                <span className={`w-1.5 h-1.5 rounded-full ${({ isActive }: any) => isActive ? 'bg-blue-600' : 'bg-slate-400'} opacity-70`}></span>
                 材料管理
               </NavLink>
             </li>
           </ul>
         </nav>
-        <div className="absolute bottom-0 w-64 border-t border-gray-200 dark:border-gray-700 p-4">
+
+        <div className="p-4 border-t border-slate-100 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-800/50">
+          <div className="flex items-center gap-3 mb-4 px-2">
+            <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-600 border border-slate-200 dark:border-slate-500 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300 shadow-sm">
+              {user?.username?.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{user?.username}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate capitalize">{user?.role}</p>
+            </div>
+          </div>
           <Form action="/logout" method="post">
             <button
               type="submit"
-              className="flex w-full items-center justify-center rounded-md border border-transparent bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-600 hover:text-red-600 dark:hover:text-red-400 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-200"
             >
-              退出登录
+              <span>退出登录</span>
             </button>
           </Form>
         </div>
       </aside>
-      <main className="flex-1 overflow-y-auto">
-        <header className="flex h-16 items-center justify-between bg-white dark:bg-gray-800 px-6 shadow-sm border-b border-gray-200 dark:border-gray-700">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Welcome back, {user?.name}</div>
+      
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <header className="h-16 flex-shrink-0 flex items-center justify-between bg-white dark:bg-slate-800 px-8 shadow-sm border-b border-slate-200 dark:border-slate-700 z-10">
+          <div className="flex items-center text-sm text-slate-500 dark:text-slate-400">
+            <span className="mr-2">当前位置:</span>
+            <span className="font-medium text-slate-800 dark:text-slate-200">
+               管理系统
+            </span>
+          </div>
           <button
             onClick={toggleTheme}
-            className="rounded-full p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 focus:outline-none"
+            className="rounded-md p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 focus:outline-none transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-600"
             title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
           >
             {theme === "dark" ? (
-              <SunIcon className="h-6 w-6" />
+              <SunIcon className="h-5 w-5" />
             ) : (
-              <MoonIcon className="h-6 w-6" />
+              <MoonIcon className="h-5 w-5" />
             )}
           </button>
         </header>
-        <Outlet />
+        <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900 scroll-smooth">
+          <Outlet />
+        </div>
       </main>
     </div>
   );
