@@ -3,11 +3,12 @@ import { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import type { Route } from "./+types/materials";
 import { requireUserId } from "./server/session.server";
-import { getUserById } from "./model/user.server";
+import { getUserById, getAllUsers } from "./model/user.server";
 import {
   getMaterials,
   createMaterial,
   claimMaterial,
+  getUniqueGameNames,
 } from "./model/material.server";
 import Pagination from "../components/Pagination";
 
@@ -28,6 +29,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const page = parseInt(url.searchParams.get("page") || "1");
   const limit = parseInt(url.searchParams.get("limit") || "10");
 
+  const [gameNames, allUsers] = await Promise.all([
+    getUniqueGameNames(),
+    getAllUsers(),
+  ]);
+
   const data = await getMaterials({
     game_name,
     account_name,
@@ -43,6 +49,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   });
   return {
     ...data,
+    gameNames,
+    allUsers,
     filters: {
       game_name,
       account_name,
@@ -122,6 +130,12 @@ export default function Materials({
   const isSubmitting = navigation.state === "submitting";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const showToast = (type: "success" | "error", message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   useEffect(() => {
     if (actionData?.success && formRef.current) {
@@ -132,20 +146,49 @@ export default function Materials({
   useEffect(() => {
     if (fetcher.data?.success && fetcher.data?.claimedAccount) {
       const account = fetcher.data.claimedAccount;
+
+      const copyFallback = (text: string) => {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        
+        // Ensure it's not visible but part of the DOM
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+          const successful = document.execCommand('copy');
+          if (successful) {
+             showToast("success", `账号 ${text} 已复制到剪贴板`);
+          } else {
+             showToast("success", `领取成功！账号: ${text}`);
+          }
+        } catch (err) {
+          console.error('Fallback copy failed', err);
+          showToast("success", `领取成功！账号: ${text}`);
+        }
+        
+        document.body.removeChild(textArea);
+      };
+
       // Check if clipboard API is available (requires secure context like HTTPS or localhost)
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(account).then(() => {
-          alert(`账号 ${account} 已复制到剪贴板`);
+          showToast("success", `账号 ${account} 已复制到剪贴板`);
         }).catch((err) => {
           console.error("Clipboard write failed", err);
-          alert(`领取成功！账号: ${account}`);
+          copyFallback(account);
         });
       } else {
         // Fallback for non-secure contexts
-        alert(`领取成功！账号: ${account}`);
+        copyFallback(account);
       }
     } else if (fetcher.data?.error) {
-      alert(fetcher.data.error);
+      showToast("error", fetcher.data.error);
     }
   }, [fetcher.data]);
 
@@ -168,9 +211,7 @@ export default function Materials({
   };
 
   const handleClaim = (id: number) => {
-    if (confirm("确定要领取该账号吗？")) {
-      fetcher.submit({ intent: "claim", id: id.toString() }, { method: "post" });
-    }
+    fetcher.submit({ intent: "claim", id: id.toString() }, { method: "post" });
   };
 
   return (
@@ -203,23 +244,28 @@ export default function Materials({
 
       {/* Search Filters */}
       <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm transition-colors duration-200">
-        <Form method="get" className="flex flex-wrap gap-4">
-          <div className="flex-1 min-w-[200px]">
+        <Form method="get" className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          <div>
             <label
               htmlFor="game_name"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
             >
               游戏名称
             </label>
-            <input
-              type="text"
+            <select
               name="game_name"
-              defaultValue={filters.game_name}
-              placeholder="搜索游戏..."
+              defaultValue={filters.game_name || ""}
               className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+            >
+              <option value="">全部</option>
+              {loaderData.gameNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="flex-1 min-w-[200px]">
+          <div>
             <label
               htmlFor="account_name"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
@@ -234,37 +280,40 @@ export default function Materials({
               className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
-          <div className="flex-1 min-w-[200px]">
+          <div>
             <label
               htmlFor="user"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
             >
               使用人
             </label>
-            <input
-              type="text"
+            <select
               name="user"
-              defaultValue={filters.user}
-              placeholder="搜索使用人..."
+              defaultValue={filters.user || ""}
               className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex-1 min-w-[200px]">
-            <label
-              htmlFor="user_real_name"
-              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
             >
-              使用人姓名
-            </label>
-            <input
-              type="text"
-              name="user_real_name"
-              defaultValue={filters.user_real_name}
-              placeholder="搜索使用人姓名..."
-              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+              <option value="">全部</option>
+              <optgroup label="管理员">
+                {loaderData.allUsers
+                  .filter((u) => u.role === "admin")
+                  .map((u) => (
+                    <option key={u.id} value={u.name}>
+                      {u.real_name ? `${u.real_name} (${u.name})` : u.name}
+                    </option>
+                  ))}
+              </optgroup>
+              <optgroup label="员工">
+                {loaderData.allUsers
+                  .filter((u) => u.role !== "admin")
+                  .map((u) => (
+                    <option key={u.id} value={u.name}>
+                      {u.real_name ? `${u.real_name} (${u.name})` : u.name}
+                    </option>
+                  ))}
+              </optgroup>
+            </select>
           </div>
-          <div className="flex-1 min-w-[200px]">
+          <div>
             <label
               htmlFor="startDate"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
@@ -278,7 +327,7 @@ export default function Materials({
               className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
-          <div className="flex-1 min-w-[200px]">
+          <div>
             <label
               htmlFor="endDate"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
@@ -292,7 +341,7 @@ export default function Materials({
               className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
-          <div className="flex-1 min-w-[200px]">
+          <div>
             <label
               htmlFor="status"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
@@ -309,7 +358,7 @@ export default function Materials({
               <option value="已使用">已使用</option>
             </select>
           </div>
-          <div className="flex-1 min-w-[200px]">
+          <div>
             <label
               htmlFor="sort"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
@@ -325,7 +374,7 @@ export default function Materials({
               <option value="usage_time">使用时间</option>
             </select>
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end gap-2">
             <button
               type="submit"
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
@@ -334,7 +383,7 @@ export default function Materials({
             </button>
             <a
               href="/materials"
-              className="ml-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               重置
             </a>
@@ -473,6 +522,17 @@ export default function Materials({
           });
         }}
       />
+
+      {/* Toast Notification */}
+      {toast && (
+        <div
+          className={`fixed bottom-4 right-4 z-50 rounded-md px-4 py-2 text-white shadow-lg transition-opacity duration-300 ${
+            toast.type === "success" ? "bg-green-600" : "bg-red-600"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }

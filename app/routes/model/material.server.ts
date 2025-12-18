@@ -1,6 +1,13 @@
 import { db } from "../server/db.server";
 import type { Material } from "../../types";
 
+export async function getUniqueGameNames() {
+  const query = `SELECT DISTINCT game_name FROM materials WHERE game_name IS NOT NULL AND game_name != '' ORDER BY game_name ASC`;
+  return (db.prepare(query).all() as { game_name: string }[]).map(
+    (r) => r.game_name
+  );
+}
+
 export async function getMaterials(filters: {
   game_name?: string;
   account_name?: string;

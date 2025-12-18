@@ -160,6 +160,11 @@ export async function updateUserPassword(userId: string, password: string) {
   }
 }
 
+export async function getAllUsers() {
+  const query = `SELECT id, name, real_name, role FROM users ORDER BY role DESC, name ASC`;
+  return db.prepare(query).all() as User[];
+}
+
 export async function getUsers(options: {
   name?: string;
   email?: string;
