@@ -319,3 +319,44 @@ export async function getTopUsersByUsage(
     count: number;
   }[];
 }
+
+export async function getAllUsersByUsage(
+  startDate: string,
+  endDate: string
+) {
+  const query = `
+    SELECT user, COUNT(*) as count
+    FROM materials
+    WHERE user IS NOT NULL AND usage_time >= ? AND usage_time <= ?
+    GROUP BY user
+    ORDER BY count DESC
+  `;
+  return db.prepare(query).all(startDate, endDate) as {
+    user: string;
+    count: number;
+  }[];
+}
+
+export async function getMaterialGameStats(limit: number = 5) {
+  const query = `
+    SELECT game_name, COUNT(*) as count
+    FROM materials
+    WHERE game_name IS NOT NULL AND game_name != ''
+    GROUP BY game_name
+    ORDER BY count DESC
+    LIMIT ?
+  `;
+  return db.prepare(query).all(limit) as { game_name: string; count: number }[];
+}
+
+export async function getUserMaterialGameStats(username: string, limit: number = 5) {
+  const query = `
+    SELECT game_name, COUNT(*) as count
+    FROM materials
+    WHERE user = ? AND game_name IS NOT NULL AND game_name != ''
+    GROUP BY game_name
+    ORDER BY count DESC
+    LIMIT ?
+  `;
+  return db.prepare(query).all(username, limit) as { game_name: string; count: number }[];
+}

@@ -99,6 +99,24 @@ export async function getTopUsersByConversion(
   }[];
 }
 
+export async function getAllUsersByConversion(
+  startDate: string,
+  endDate: string
+) {
+  const query = `
+    SELECT u.name as user, SUM(dc.count) as count
+    FROM daily_conversions dc
+    JOIN users u ON dc.user_id = u.id
+    WHERE dc.date >= ? AND dc.date <= ?
+    GROUP BY u.name
+    ORDER BY count DESC
+  `;
+  return db.prepare(query).all(startDate, endDate) as {
+    user: string;
+    count: number;
+  }[];
+}
+
 export async function getAllUserConversions(
   startDate?: string,
   endDate?: string

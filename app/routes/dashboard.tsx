@@ -15,7 +15,7 @@ import {
   getConversion,
   getConversions,
   getAllConversions,
-  getTopUsersByConversion,
+  getAllUsersByConversion,
   getSystemTotalConversion,
 } from "./model/conversion.server";
 import {
@@ -23,9 +23,11 @@ import {
   getTodayUsageCount,
   getAllMaterialUsageStats,
   getMaterialStatusStats,
-  getTopUsersByUsage,
+  getAllUsersByUsage,
   getUsageCountByDate,
   getSystemUsageCountByDate,
+  getMaterialGameStats,
+  getUserMaterialGameStats,
 } from "./model/material.server";
 import {
   LineChart,
@@ -84,6 +86,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const conversions = await getConversions(Number(userId), startDate, endDate);
   const usageStats = await getMaterialUsageStats(user.name, startDate, endDate);
+  const userGameStats = await getUserMaterialGameStats(user.name);
 
   // Merge data for charts
   const chartData = [];
@@ -113,8 +116,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     const allUsage = await getAllMaterialUsageStats(startDate, endDate);
     const allConversions = await getAllConversions(startDate, endDate);
     const statusStats = await getMaterialStatusStats();
-    const topUsersUsage = await getTopUsersByUsage(startDate, endDate);
-    const topUsersConversion = await getTopUsersByConversion(
+    const usersUsageRanking = await getAllUsersByUsage(startDate, endDate);
+    const usersConversionRanking = await getAllUsersByConversion(
       startDate,
       endDate
     );
@@ -124,6 +127,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const systemYesterdayConversion = await getSystemTotalConversion(yesterday);
     const systemTodayUsage = await getSystemUsageCountByDate(today);
     const systemYesterdayUsage = await getSystemUsageCountByDate(yesterday);
+    const systemGameStats = await getMaterialGameStats();
 
     const adminChartData = [];
     for (
@@ -147,12 +151,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     adminData = {
       chartData: adminChartData,
       statusStats,
-      topUsersUsage,
-      topUsersConversion,
+      usersUsageRanking,
+      usersConversionRanking,
       systemTodayConversion,
       systemYesterdayConversion,
       systemTodayUsage,
       systemYesterdayUsage,
+      systemGameStats,
     };
   }
 
@@ -165,6 +170,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     yesterdayUsageCount,
     chartData,
     recentConversions,
+    userGameStats,
     adminData,
   };
 }
@@ -219,9 +225,11 @@ export default function Dashboard({
     yesterdayUsageCount,
     chartData,
     recentConversions,
+    userGameStats,
     adminData,
   } = loaderData;
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [rankingTab, setRankingTab] = useState<'conversion' | 'usage'>('conversion');
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   const formRef = useRef<HTMLFormElement>(null);
@@ -238,93 +246,93 @@ export default function Dashboard({
 
   if (user.role === "admin" && adminData) {
     return (
-      <div className="p-8 container mx-auto text-slate-800 dark:text-slate-200 space-y-8 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-6">
+      <div className="p-6 container mx-auto text-slate-800 dark:text-slate-200 space-y-6 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
               管理工作台
             </h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               全平台数据概览与分析
             </p>
           </div>
-          <div className="text-sm font-medium px-4 py-2 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
+          <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
             {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
           </div>
         </div>
 
         {/* Admin KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex justify-between items-start mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">今日总转化</p>
-                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-2 tracking-tight">{adminData.systemTodayConversion}</h3>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日总转化</p>
+                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">{adminData.systemTodayConversion}</h3>
               </div>
-              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
-                <ChartBarIcon className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ChartBarIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
             <TrendIndicator current={adminData.systemTodayConversion} previous={adminData.systemYesterdayConversion} />
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex justify-between items-start mb-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">今日总使用</p>
-                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-2 tracking-tight">{adminData.systemTodayUsage}</h3>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日总使用</p>
+                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">{adminData.systemTodayUsage}</h3>
               </div>
-              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
-                <ComputerDesktopIcon className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ComputerDesktopIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
             <TrendIndicator current={adminData.systemTodayUsage} previous={adminData.systemYesterdayUsage} />
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex justify-between items-start mb-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">今日转化率</p>
-                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-2 tracking-tight">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日转化率</p>
+                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
                   {adminData.systemTodayUsage > 0 
                     ? ((adminData.systemTodayConversion / adminData.systemTodayUsage) * 100).toFixed(1) 
                     : 0}%
                 </h3>
               </div>
-              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
-                <ArrowTrendingUpIcon className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ArrowTrendingUpIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
             <div className="text-xs text-slate-500">全平台平均水平</div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex justify-between items-start mb-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">活跃账号数</p>
-                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mt-2 tracking-tight">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">活跃账号数</p>
+                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
                   {adminData.statusStats.reduce((acc: number, curr: any) => acc + curr.count, 0)}
                 </h3>
               </div>
-              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
-                <UserGroupIcon className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <UserGroupIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
             <div className="text-xs text-slate-500">系统总登记账号</div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Global Trend */}
-          <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex items-center justify-between mb-6">
+          <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between mb-4">
               <div className="flex items-center">
-                <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+                <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
                   全平台趋势分析 (30天)
                 </h2>
               </div>
             </div>
-            <div className="h-80 w-full min-w-0">
+            <div className="h-64 w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <AreaChart data={adminData.chartData}>
                   <defs>
@@ -360,13 +368,13 @@ export default function Dashboard({
           </div>
 
           {/* Material Status Distribution */}
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex items-center mb-6">
-              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center mb-4">
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
                 账号状态分布
               </h2>
             </div>
-            <div className="h-80 w-full min-w-0">
+            <div className="h-64 w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <PieChart>
                   <Pie
@@ -408,24 +416,35 @@ export default function Dashboard({
             </div>
           </div>
         </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Top Users by Conversion */}
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex items-center mb-6">
-              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600 mr-3">
-                <TrophyIcon className="w-5 h-5 text-amber-500" />
-              </div>
-              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
-                转化榜 Top 5
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          {/* Game Distribution */}
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 h-96 flex flex-col">
+            <div className="flex items-center mb-4 flex-shrink-0">
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
+                游戏分布
               </h2>
             </div>
-            <div className="h-64 w-full min-w-0">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart layout="vertical" data={adminData.topUsersConversion} margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                  <XAxis type="number" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis dataKey="user" type="category" stroke="#64748b" fontSize={12} width={80} tickLine={false} axisLine={false} />
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={adminData.systemGameStats}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="count"
+                    nameKey="game_name"
+                  >
+                    {adminData.systemGameStats.map((entry: any, index: number) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={COLORS[index % COLORS.length]}
+                        strokeWidth={0}
+                      />
+                    ))}
+                  </Pie>
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "#1e293b",
@@ -435,30 +454,37 @@ export default function Dashboard({
                       border: "1px solid #334155"
                     }}
                     itemStyle={{ color: "#f8fafc" }}
-                    cursor={{ fill: '#f1f5f9' }}
                   />
-                  <Bar dataKey="count" name="转化数" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={20} />
-                </BarChart>
+                  <Legend 
+                    layout="horizontal" 
+                    verticalAlign="bottom" 
+                    align="center"
+                    wrapperStyle={{ paddingTop: '10px', fontSize: '12px' }}
+                  />
+                </PieChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* Top Users by Usage */}
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex items-center mb-6">
-              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600 mr-3">
-                <FireIcon className="w-5 h-5 text-rose-500" />
-              </div>
-              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
-                勤奋榜 Top 5
+          {/* Conversion Rate Trend */}
+          <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 h-96 flex flex-col">
+            <div className="flex items-center mb-4 flex-shrink-0">
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
+                转化率趋势
               </h2>
             </div>
-            <div className="h-64 w-full min-w-0">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart layout="vertical" data={adminData.topUsersUsage} margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                  <XAxis type="number" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis dataKey="user" type="category" stroke="#64748b" fontSize={12} width={80} tickLine={false} axisLine={false} />
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={adminData.chartData}>
+                  <defs>
+                    <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#d97706" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#d97706" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickFormatter={(val) => val.slice(5)} tickLine={false} axisLine={false} dy={10} />
+                  <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "#1e293b",
@@ -468,11 +494,61 @@ export default function Dashboard({
                       border: "1px solid #334155"
                     }}
                     itemStyle={{ color: "#f8fafc" }}
-                    cursor={{ fill: '#f1f5f9' }}
                   />
-                  <Bar dataKey="count" name="账号使用数" fill="#d97706" radius={[0, 4, 4, 0]} barSize={20} />
-                </BarChart>
+                  <Area type="monotone" dataKey="rate" name="转化率" stroke="#d97706" strokeWidth={2} fillOpacity={1} fill="url(#colorRate)" />
+                </AreaChart>
               </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Combined Rankings */}
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 flex flex-col h-96">
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
+              <div className="flex items-center">
+                <div className={`p-1.5 rounded-md border mr-3 transition-colors ${rankingTab === 'conversion' ? 'bg-amber-50 border-amber-100 text-amber-500 dark:bg-amber-900/20 dark:border-amber-800' : 'bg-rose-50 border-rose-100 text-rose-500 dark:bg-rose-900/20 dark:border-rose-800'}`}>
+                  {rankingTab === 'conversion' ? <TrophyIcon className="w-4 h-4" /> : <FireIcon className="w-4 h-4" />}
+                </div>
+                <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
+                  {rankingTab === 'conversion' ? '转化排行榜' : '勤奋排行榜'}
+                </h2>
+              </div>
+              <div className="flex bg-slate-100 dark:bg-slate-700/50 rounded-lg p-1">
+                <button
+                  onClick={() => setRankingTab('conversion')}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'conversion' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                >
+                  转化
+                </button>
+                <button
+                  onClick={() => setRankingTab('usage')}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'usage' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                >
+                  勤奋
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+              {(rankingTab === 'conversion' ? adminData.usersConversionRanking : adminData.usersUsageRanking).map((item: any, index: number) => (
+                <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-700/30 mb-2 last:mb-0 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className={`
+                      w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow-sm
+                      ${index === 0 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 ring-1 ring-yellow-200 dark:ring-yellow-500/30' : 
+                        index === 1 ? 'bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-300 ring-1 ring-slate-300 dark:ring-slate-500' : 
+                        index === 2 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400 ring-1 ring-orange-200 dark:ring-orange-500/30' : 
+                        'bg-white text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-600'}
+                    `}>
+                      {index + 1}
+                    </div>
+                    <span className={`text-sm font-medium ${index < 3 ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
+                      {item.user}
+                    </span>
+                  </div>
+                  <span className={`text-sm font-bold ${index < 3 ? (rankingTab === 'conversion' ? 'text-blue-600 dark:text-blue-400' : 'text-rose-600 dark:text-rose-400') : 'text-slate-600 dark:text-slate-400'}`}>
+                    {item.count}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -481,72 +557,72 @@ export default function Dashboard({
   }
 
   return (
-    <div className="p-8 container mx-auto text-slate-800 dark:text-slate-200 space-y-8 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
-      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-6">
+    <div className="p-6 container mx-auto text-slate-800 dark:text-slate-200 space-y-6 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
+      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
             工作台
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             欢迎回来，{user.username}
           </p>
         </div>
-        <div className="text-sm font-medium px-4 py-2 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
+        <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
           {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Today Conversion Card */}
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700 relative overflow-hidden group">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-            <ChartBarIcon className="w-24 h-24 text-slate-400" />
+            <ChartBarIcon className="w-20 h-20 text-slate-400" />
           </div>
           <div className="relative z-10">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-slate-700 dark:text-slate-300">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-bold text-slate-700 dark:text-slate-300">
                 今日转化
               </h2>
-              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
-                <ChartBarIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ChartBarIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               </div>
             </div>
-            <div className="text-4xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
+            <div className="text-3xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
               {todayConversion?.count || 0}
             </div>
             <TrendIndicator current={todayConversion?.count || 0} previous={yesterdayConversion?.count || 0} />
             
             <button
               onClick={() => setIsModalOpen(true)}
-              className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 shadow-sm hover:shadow-md active:scale-[0.98]"
+              className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors flex items-center justify-center gap-2 shadow-sm hover:shadow-md active:scale-[0.98] text-sm"
             >
-              <PlusIcon className="w-5 h-5" />
+              <PlusIcon className="w-4 h-4" />
               <span>转化登记</span>
             </button>
           </div>
         </div>
 
         {/* Today Usage Card */}
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700 relative overflow-hidden group">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-            <ComputerDesktopIcon className="w-24 h-24 text-slate-400" />
+            <ComputerDesktopIcon className="w-20 h-20 text-slate-400" />
           </div>
           <div className="relative z-10">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-slate-700 dark:text-slate-300">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-bold text-slate-700 dark:text-slate-300">
                 今日账号使用
               </h2>
-              <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
-                <ComputerDesktopIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+                <ComputerDesktopIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               </div>
             </div>
-            <div className="text-4xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
+            <div className="text-3xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
               {todayUsageCount}
             </div>
             <TrendIndicator current={todayUsageCount} previous={yesterdayUsageCount} />
 
-            <div className="mt-6 flex items-center text-sm text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/30 p-2.5 rounded-md border border-slate-100 dark:border-slate-700">
-              <ArrowTrendingUpIcon className="w-4 h-4 mr-2 text-slate-400" />
+            <div className="mt-4 flex items-center text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/30 p-2 rounded-md border border-slate-100 dark:border-slate-700">
+              <ArrowTrendingUpIcon className="w-3 h-3 mr-2 text-slate-400" />
               <span>今日转化率: </span>
               <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
                 {todayUsageCount > 0
@@ -559,34 +635,34 @@ export default function Dashboard({
         </div>
 
         {/* Recent Activity Card */}
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700 relative overflow-hidden">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-slate-700 dark:text-slate-300">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 relative overflow-hidden">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-bold text-slate-700 dark:text-slate-300">
               近期动态
             </h2>
-            <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
-              <ClockIcon className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+            <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
+              <ClockIcon className="w-4 h-4 text-slate-600 dark:text-slate-400" />
             </div>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-3">
             {recentConversions.length > 0 ? (
               recentConversions.slice(0, 3).map((conv: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between text-sm border-b border-slate-100 dark:border-slate-700/50 pb-3 last:border-0 last:pb-0">
+                <div key={idx} className="flex items-center justify-between text-xs border-b border-slate-100 dark:border-slate-700/50 pb-2 last:border-0 last:pb-0">
                   <div className="flex items-center text-slate-600 dark:text-slate-300">
-                    <div className="w-2 h-2 rounded-full bg-blue-500 mr-3"></div>
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-2"></div>
                     <span>转化登记</span>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <span className="font-medium text-slate-900 dark:text-white">+{conv.count}</span>
                     <span className="text-xs text-slate-400">{new Date(conv.date).toLocaleDateString()}</span>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="text-sm text-slate-400 text-center py-4">暂无近期记录</div>
+              <div className="text-xs text-slate-400 text-center py-4">暂无近期记录</div>
             )}
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
-               <div className="flex items-center justify-between text-sm">
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+               <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">近30日总转化</span>
                   <span className="font-bold text-slate-900 dark:text-white">
                     {chartData.reduce((acc: number, curr: any) => acc + curr.conversion, 0)}
@@ -598,15 +674,15 @@ export default function Dashboard({
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Conversion Trend */}
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-          <div className="flex items-center mb-6">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center mb-4">
+            <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
               近30日转化趋势
             </h2>
           </div>
-          <div className="h-80 w-full min-w-0">
+          <div className="h-64 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <AreaChart data={chartData}>
                 <defs>
@@ -640,14 +716,63 @@ export default function Dashboard({
           </div>
         </div>
 
+        {/* Game Distribution */}
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center mb-4">
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
+                常用游戏分布
+              </h2>
+            </div>
+            <div className="h-64 w-full min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                <PieChart>
+                  <Pie
+                    data={userGameStats}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="count"
+                    nameKey="game_name"
+                  >
+                    {userGameStats.map((entry: any, index: number) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={COLORS[index % COLORS.length]}
+                        strokeWidth={0}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#1e293b",
+                      borderColor: "#334155",
+                      color: "#f8fafc",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #334155"
+                    }}
+                    itemStyle={{ color: "#f8fafc" }}
+                  />
+                  <Legend 
+                    layout="vertical" 
+                    verticalAlign="middle" 
+                    align="center"
+                    wrapperStyle={{ paddingTop: '20px' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+        </div>
+
         {/* Conversion Rate Trend */}
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-slate-200 dark:border-slate-700">
-          <div className="flex items-center mb-6">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
+        <div className="lg:col-span-3 bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center mb-4">
+            <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
               近30日转化率趋势
             </h2>
           </div>
-          <div className="h-80 w-full min-w-0">
+          <div className="h-64 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
