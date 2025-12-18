@@ -1,4 +1,4 @@
-import { NavLink, Outlet, Form } from "react-router";
+import { NavLink, Outlet, Form, Link } from "react-router";
 import type { Route } from "./+types/layout";
 import { requireUserId } from "./server/session.server";
 import { getUserById } from "./model/user.server";
@@ -96,15 +96,15 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
         </nav>
 
         <div className="p-4 border-t border-slate-100 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-800/50">
-          <div className="flex items-center gap-3 mb-4 px-2">
-            <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-600 border border-slate-200 dark:border-slate-500 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300 shadow-sm">
-              {user?.username?.charAt(0).toUpperCase()}
+          <Link to="/profile" className="flex items-center gap-3 mb-4 px-2 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-md py-2 transition-colors cursor-pointer group">
+            <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-600 border border-slate-200 dark:border-slate-500 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300 shadow-sm group-hover:border-blue-400 transition-colors">
+              {(user?.real_name || user?.name || "").slice(-2).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{user?.username}</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{user?.name}</p>
               <p className="text-xs text-slate-500 dark:text-slate-400 truncate capitalize">{user?.role}</p>
             </div>
-          </div>
+          </Link>
           <Form action="/logout" method="post">
             <button
               type="submit"
