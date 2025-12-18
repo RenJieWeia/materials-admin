@@ -137,6 +137,49 @@ export default function Materials({
     setTimeout(() => setToast(null), 3000);
   };
 
+  const copyToClipboard = (text: string, isClaim: boolean = false) => {
+    const copyFallback = (text: string) => {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      
+      // Ensure it's not visible but part of the DOM
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      textArea.style.top = "0";
+      
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+           showToast("success", `账号 ${text} 已复制到剪贴板`);
+        } else {
+           showToast("success", isClaim ? `领取成功！账号: ${text}` : `账号: ${text}`);
+        }
+      } catch (err) {
+        console.error('Fallback copy failed', err);
+        showToast("success", isClaim ? `领取成功！账号: ${text}` : `账号: ${text}`);
+      }
+      
+      document.body.removeChild(textArea);
+    };
+
+    // Check if clipboard API is available (requires secure context like HTTPS or localhost)
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast("success", `账号 ${text} 已复制到剪贴板`);
+      }).catch((err) => {
+        console.error("Clipboard write failed", err);
+        copyFallback(text);
+      });
+    } else {
+      // Fallback for non-secure contexts
+      copyFallback(text);
+    }
+  };
+
   useEffect(() => {
     if (actionData?.success && formRef.current) {
       formRef.current.reset();
@@ -145,48 +188,7 @@ export default function Materials({
 
   useEffect(() => {
     if (fetcher.data?.success && fetcher.data?.claimedAccount) {
-      const account = fetcher.data.claimedAccount;
-
-      const copyFallback = (text: string) => {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        
-        // Ensure it's not visible but part of the DOM
-        textArea.style.position = "fixed";
-        textArea.style.left = "-9999px";
-        textArea.style.top = "0";
-        
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        
-        try {
-          const successful = document.execCommand('copy');
-          if (successful) {
-             showToast("success", `账号 ${text} 已复制到剪贴板`);
-          } else {
-             showToast("success", `领取成功！账号: ${text}`);
-          }
-        } catch (err) {
-          console.error('Fallback copy failed', err);
-          showToast("success", `领取成功！账号: ${text}`);
-        }
-        
-        document.body.removeChild(textArea);
-      };
-
-      // Check if clipboard API is available (requires secure context like HTTPS or localhost)
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(account).then(() => {
-          showToast("success", `账号 ${account} 已复制到剪贴板`);
-        }).catch((err) => {
-          console.error("Clipboard write failed", err);
-          copyFallback(account);
-        });
-      } else {
-        // Fallback for non-secure contexts
-        copyFallback(account);
-      }
+      copyToClipboard(fetcher.data.claimedAccount, true);
     } else if (fetcher.data?.error) {
       showToast("error", fetcher.data.error);
     }
@@ -463,7 +465,7 @@ export default function Materials({
                       {material.game_name}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
-                      {material.account_name.includes("****") ? (
+                      {material.status === "空闲" ? (
                         <button
                           onClick={() => handleClaim(material.id)}
                           className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline"
@@ -472,7 +474,13 @@ export default function Materials({
                           {material.account_name}
                         </button>
                       ) : (
-                        material.account_name
+                        <button
+                          onClick={() => copyToClipboard(material.account_name)}
+                          className="text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer"
+                          title="点击复制账号"
+                        >
+                          {material.account_name}
+                        </button>
                       )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2 text-sm">
