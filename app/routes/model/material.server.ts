@@ -232,11 +232,11 @@ export async function getMaterialUsageStats(
   endDate: string
 ) {
   const query = `
-    SELECT usage_time as date, COUNT(*) as count
+    SELECT date(usage_time) as date, COUNT(*) as count
     FROM materials
-    WHERE user = ? AND usage_time >= ? AND usage_time <= ?
-    GROUP BY usage_time
-    ORDER BY usage_time ASC
+    WHERE user = ? AND date(usage_time) >= ? AND date(usage_time) <= ?
+    GROUP BY date(usage_time)
+    ORDER BY date ASC
   `;
   return db.prepare(query).all(username, startDate, endDate) as {
     date: string;
@@ -249,7 +249,7 @@ export async function getTodayUsageCount(username: string) {
   const query = `
     SELECT COUNT(*) as count
     FROM materials
-    WHERE user = ? AND usage_time = ?
+    WHERE user = ? AND date(usage_time) = ?
   `;
   const result = db.prepare(query).get(username, today) as { count: number };
   return result.count;
@@ -259,7 +259,7 @@ export async function getUsageCountByDate(username: string, date: string) {
   const query = `
     SELECT COUNT(*) as count
     FROM materials
-    WHERE user = ? AND usage_time = ?
+    WHERE user = ? AND date(usage_time) = ?
   `;
   const result = db.prepare(query).get(username, date) as { count: number };
   return result.count;
@@ -269,7 +269,7 @@ export async function getSystemUsageCountByDate(date: string) {
   const query = `
     SELECT COUNT(*) as count
     FROM materials
-    WHERE usage_time = ?
+    WHERE date(usage_time) = ?
   `;
   const result = db.prepare(query).get(date) as { count: number };
   return result.count;
@@ -280,11 +280,11 @@ export async function getAllMaterialUsageStats(
   endDate: string
 ) {
   const query = `
-    SELECT usage_time as date, COUNT(*) as count
+    SELECT date(usage_time) as date, COUNT(*) as count
     FROM materials
-    WHERE usage_time >= ? AND usage_time <= ?
-    GROUP BY usage_time
-    ORDER BY usage_time ASC
+    WHERE date(usage_time) >= ? AND date(usage_time) <= ?
+    GROUP BY date(usage_time)
+    ORDER BY date ASC
   `;
   return db.prepare(query).all(startDate, endDate) as {
     date: string;
@@ -327,7 +327,7 @@ export async function getAllUsersByUsage(
   const query = `
     SELECT user, COUNT(*) as count
     FROM materials
-    WHERE user IS NOT NULL AND usage_time >= ? AND usage_time <= ?
+    WHERE user IS NOT NULL AND date(usage_time) >= ? AND date(usage_time) <= ?
     GROUP BY user
     ORDER BY count DESC
   `;

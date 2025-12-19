@@ -311,14 +311,16 @@ export default function Dashboard({
               <div>
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400">活跃账号数</p>
                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
-                  {adminData.statusStats.reduce((acc: number, curr: any) => acc + curr.count, 0)}
+                  {adminData.statusStats
+                    .filter((s: any) => s.status !== '已使用')
+                    .reduce((acc: number, curr: any) => acc + curr.count, 0)}
                 </h3>
               </div>
               <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
                 <UserGroupIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
-            <div className="text-xs text-slate-500">系统总登记账号</div>
+            <div className="text-xs text-slate-500">系统可用账号</div>
           </div>
         </div>
 
