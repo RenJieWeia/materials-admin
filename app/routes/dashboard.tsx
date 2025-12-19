@@ -3,6 +3,7 @@ import {
   useLoaderData,
   useActionData,
   useNavigation,
+  useFetcher,
   isRouteErrorResponse,
   Link,
 } from "react-router";
@@ -27,8 +28,15 @@ import {
   getUsageCountByDate,
   getSystemUsageCountByDate,
   getMaterialGameStats,
+  getIdleMaterialGameStats,
   getUserMaterialGameStats,
 } from "./model/material.server";
+import {
+  getTodos,
+  createTodo,
+  toggleTodo,
+  deleteTodo,
+} from "./model/todo.server";
 import {
   LineChart,
   Line,
@@ -58,6 +66,8 @@ import {
   ArrowTrendingDownIcon,
   ClockIcon,
   ListBulletIcon,
+  TrashIcon,
+  CheckCircleIcon,
 } from "@heroicons/react/24/outline";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -67,10 +77,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response("User not found", { status: 404 });
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
   const yesterdayObj = new Date();
   yesterdayObj.setDate(yesterdayObj.getDate() - 1);
-  const yesterday = yesterdayObj.toISOString().split("T")[0];
+  const yesterday = yesterdayObj.toLocaleDateString('en-CA');
 
   // Common Data
   const todayConversion = await getConversion(Number(userId), today);
@@ -82,7 +92,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const endDate = today;
   const startDateObj = new Date();
   startDateObj.setDate(startDateObj.getDate() - 29);
-  const startDate = startDateObj.toISOString().split("T")[0];
+  const startDate = startDateObj.toLocaleDateString('en-CA');
 
   const conversions = await getConversions(Number(userId), startDate, endDate);
   const usageStats = await getMaterialUsageStats(user.name, startDate, endDate);
@@ -95,7 +105,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     d <= new Date(today);
     d.setDate(d.getDate() + 1)
   ) {
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = d.toLocaleDateString('en-CA');
     const conv = conversions.find((c) => c.date === dateStr)?.count || 0;
     const usage = usageStats.find((u) => u.date === dateStr)?.count || 0;
     const rate = usage > 0 ? parseFloat((conv / usage).toFixed(2)) : 0;
@@ -127,7 +137,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     const systemYesterdayConversion = await getSystemTotalConversion(yesterday);
     const systemTodayUsage = await getSystemUsageCountByDate(today);
     const systemYesterdayUsage = await getSystemUsageCountByDate(yesterday);
+    const todos = await getTodos(Number(userId));
     const systemGameStats = await getMaterialGameStats();
+    const idleGameStats = await getIdleMaterialGameStats();
 
     const adminChartData = [];
     for (
@@ -135,7 +147,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       d <= new Date(today);
       d.setDate(d.getDate() + 1)
     ) {
-      const dateStr = d.toISOString().split("T")[0];
+      const dateStr = d.toLocaleDateString('en-CA');
       const conv = allConversions.find((c) => c.date === dateStr)?.count || 0;
       const usage = allUsage.find((u) => u.date === dateStr)?.count || 0;
       const rate = usage > 0 ? parseFloat((conv / usage).toFixed(2)) : 0;
@@ -157,7 +169,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       systemYesterdayConversion,
       systemTodayUsage,
       systemYesterdayUsage,
+      idleGameStats,
       systemGameStats,
+      todos,
     };
   }
 
@@ -191,6 +205,28 @@ export async function action({ request }: Route.ActionArgs) {
     await recordConversion(Number(userId), date, count);
     return { success: true, message: "登记成功" };
   }
+
+  if (intent === "add_todo") {
+    const text = formData.get("text") as string;
+    if (!text || text.trim() === "") {
+      return { error: "请输入待办事项内容" };
+    }
+    await createTodo(Number(userId), text);
+    return { success: true };
+  }
+
+  if (intent === "toggle_todo") {
+    const id = parseInt(formData.get("todoId") as string);
+    await toggleTodo(id, Number(userId));
+    return { success: true };
+  }
+
+  if (intent === "delete_todo") {
+    const id = parseInt(formData.get("todoId") as string);
+    await deleteTodo(id, Number(userId));
+    return { success: true };
+  }
+
   return null;
 }
 
@@ -228,6 +264,15 @@ export default function Dashboard({
     userGameStats,
     adminData,
   } = loaderData;
+
+  const addTodoFetcher = useFetcher();
+  const addFormRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (addTodoFetcher.state === "submitting") {
+      addFormRef.current?.reset();
+    }
+  }, [addTodoFetcher.state]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [rankingTab, setRankingTab] = useState<'conversion' | 'usage'>('conversion');
   const navigation = useNavigation();
@@ -309,10 +354,10 @@ export default function Dashboard({
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
             <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">活跃账号数</p>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">库存账号数</p>
                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
                   {adminData.statusStats
-                    .filter((s: any) => s.status !== '已使用')
+                    .filter((s: any) => s.status === '空闲')
                     .reduce((acc: number, curr: any) => acc + curr.count, 0)}
                 </h3>
               </div>
@@ -320,7 +365,7 @@ export default function Dashboard({
                 <UserGroupIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
-            <div className="text-xs text-slate-500">系统可用账号</div>
+            <div className="text-xs text-slate-500">系统空闲账号</div>
           </div>
         </div>
 
@@ -369,53 +414,69 @@ export default function Dashboard({
             </div>
           </div>
 
-          {/* Material Status Distribution */}
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
+          {/* Todo List */}
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 flex flex-col h-full">
             <div className="flex items-center mb-4">
               <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
-                账号状态分布
+                待办清单
               </h2>
             </div>
-            <div className="h-64 w-full min-w-0">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <PieChart>
-                  <Pie
-                    data={adminData.statusStats}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="count"
-                    nameKey="status"
-                  >
-                    {adminData.statusStats.map((entry: any, index: number) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={COLORS[index % COLORS.length]}
-                        strokeWidth={0}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#1e293b",
-                      borderColor: "#334155",
-                      color: "#f8fafc",
-                      borderRadius: "0.375rem",
-                      border: "1px solid #334155"
-                    }}
-                    itemStyle={{ color: "#f8fafc" }}
-                  />
-                  <Legend 
-                    layout="vertical" 
-                    verticalAlign="middle" 
-                    align="center"
-                    wrapperStyle={{ paddingTop: '20px' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+            
+            <div className="flex-1 overflow-y-auto mb-4 space-y-2 pr-2 custom-scrollbar">
+              {adminData.todos && adminData.todos.length > 0 ? (
+                adminData.todos.map((todo) => (
+                  <div key={todo.id} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-700/50 rounded group">
+                    <div className="flex items-center gap-3 flex-1">
+                      <Form method="post" className="flex items-center" preventScrollReset>
+                        <input type="hidden" name="intent" value="toggle_todo" />
+                        <input type="hidden" name="todoId" value={todo.id} />
+                        <button type="submit" className="text-slate-400 hover:text-blue-500 transition-colors cursor-pointer">
+                          {todo.completed ? (
+                            <CheckCircleIcon className="w-5 h-5 text-green-500" />
+                          ) : (
+                            <div className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-500" />
+                          )}
+                        </button>
+                      </Form>
+                      <span className={`text-sm ${todo.completed ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-slate-200'}`}>
+                        {todo.text}
+                      </span>
+                    </div>
+                    <Form method="post" preventScrollReset>
+                      <input type="hidden" name="intent" value="delete_todo" />
+                      <input type="hidden" name="todoId" value={todo.id} />
+                      <button type="submit" className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                        <TrashIcon className="w-4 h-4" />
+                      </button>
+                    </Form>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center text-slate-400 py-8 text-sm">
+                  暂无待办事项
+                </div>
+              )}
             </div>
+
+            <addTodoFetcher.Form method="post" className="mt-auto" ref={addFormRef}>
+              <input type="hidden" name="intent" value="add_todo" />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  name="text"
+                  placeholder="添加新的待办事项..."
+                  className="flex-1 px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-md bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                  disabled={addTodoFetcher.state === "submitting"}
+                >
+                  {addTodoFetcher.state === "submitting" ? "添加中..." : "添加"}
+                </button>
+              </div>
+            </addTodoFetcher.Form>
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
