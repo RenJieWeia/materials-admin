@@ -144,6 +144,12 @@ export async function claimMaterial(id: number, username: string) {
   return { ...material, status: "已使用", user: username, usage_time: now };
 }
 
+export async function getMaterialByAccountName(accountName: string) {
+  return db
+    .prepare("SELECT * FROM materials WHERE account_name = ?")
+    .get(accountName) as Material | undefined;
+}
+
 export async function createMaterial(data: {
   game_name: string;
   account_name: string;

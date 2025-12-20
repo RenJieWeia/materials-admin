@@ -10,6 +10,7 @@ import {
   createMaterial,
   claimMaterial,
   getUniqueGameNames,
+  getMaterialByAccountName,
 } from "./model/material.server";
 import Pagination from "../components/Pagination";
 
@@ -97,9 +98,19 @@ export async function action({ request }: Route.ActionArgs) {
     const data = XLSX.utils.sheet_to_json(sheet) as any[];
 
     let count = 0;
+    let skipped = 0;
+    const skippedAccounts: string[] = [];
+
     for (const row of data) {
       // 假设 Excel 列名为：游戏名称, 账户名称
       if (row["游戏名称"] && row["账户名称"]) {
+        const existing = await getMaterialByAccountName(row["账户名称"]);
+        if (existing) {
+          skipped++;
+          skippedAccounts.push(row["账户名称"]);
+          continue;
+        }
+
         await createMaterial({
           game_name: row["游戏名称"],
           account_name: row["账户名称"],
@@ -112,7 +123,16 @@ export async function action({ request }: Route.ActionArgs) {
       }
     }
 
-    return { success: true, message: `成功导入 ${count} 条数据` };
+    let message = `成功导入 ${count} 条数据`;
+    if (skipped > 0) {
+      message += `，跳过 ${skipped} 条重复数据`;
+      if (skippedAccounts.length > 0) {
+         const displayedAccounts = skippedAccounts.slice(0, 3).join(", ");
+         message += ` (重复账号: ${displayedAccounts}${skippedAccounts.length > 3 ? ' 等' : ''})`;
+      }
+    }
+
+    return { success: true, message };
   }
 
   return null;

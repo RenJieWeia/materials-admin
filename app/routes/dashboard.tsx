@@ -196,13 +196,18 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "record_conversion") {
     const count = parseInt(formData.get("count") as string);
+    const passCount = parseInt(formData.get("passCount") as string) || 0;
     const date = new Date().toISOString().split("T")[0]; // Always record for today
 
     if (isNaN(count) || count < 0) {
       return { error: "请输入有效的数量" };
     }
 
-    await recordConversion(Number(userId), date, count);
+    if (passCount < 0 || passCount > count) {
+      return { error: "通过数量不能小于0或大于转化数量" };
+    }
+
+    await recordConversion(Number(userId), date, count, passCount);
     return { success: true, message: "登记成功" };
   }
 
@@ -274,7 +279,7 @@ export default function Dashboard({
     }
   }, [addTodoFetcher.state]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [rankingTab, setRankingTab] = useState<'conversion' | 'usage'>('conversion');
+  const [rankingTab, setRankingTab] = useState<'conversion' | 'usage' | 'passRate'>('conversion');
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   const formRef = useRef<HTMLFormElement>(null);
@@ -312,13 +317,30 @@ export default function Dashboard({
             <div className="flex justify-between items-start mb-3">
               <div>
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日总转化</p>
-                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">{adminData.systemTodayConversion}</h3>
+                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">{adminData.systemTodayConversion.count}</h3>
               </div>
               <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
                 <ChartBarIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
-            <TrendIndicator current={adminData.systemTodayConversion} previous={adminData.systemYesterdayConversion} />
+            <TrendIndicator current={adminData.systemTodayConversion.count} previous={adminData.systemYesterdayConversion.count} />
+            <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/30 p-1.5 rounded-md border border-slate-100 dark:border-slate-700">
+              <div className="flex items-center">
+                <span>通过: </span>
+                <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
+                  {adminData.systemTodayConversion.pass_count}
+                </span>
+              </div>
+              <div className="flex items-center">
+                <span>率: </span>
+                <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
+                  {adminData.systemTodayConversion.count > 0
+                    ? ((adminData.systemTodayConversion.pass_count / adminData.systemTodayConversion.count) * 100).toFixed(1)
+                    : 0}
+                  %
+                </span>
+              </div>
+            </div>
           </div>
 
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
@@ -340,7 +362,7 @@ export default function Dashboard({
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日转化率</p>
                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
                   {adminData.systemTodayUsage > 0 
-                    ? ((adminData.systemTodayConversion / adminData.systemTodayUsage) * 100).toFixed(1) 
+                    ? ((adminData.systemTodayConversion.count / adminData.systemTodayUsage) * 100).toFixed(1) 
                     : 0}%
                 </h3>
               </div>
@@ -568,50 +590,84 @@ export default function Dashboard({
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 flex flex-col h-96">
             <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <div className="flex items-center">
-                <div className={`p-1.5 rounded-md border mr-3 transition-colors ${rankingTab === 'conversion' ? 'bg-amber-50 border-amber-100 text-amber-500 dark:bg-amber-900/20 dark:border-amber-800' : 'bg-rose-50 border-rose-100 text-rose-500 dark:bg-rose-900/20 dark:border-rose-800'}`}>
-                  {rankingTab === 'conversion' ? <TrophyIcon className="w-4 h-4" /> : <FireIcon className="w-4 h-4" />}
+                <div className={`p-1.5 rounded-md border mr-3 transition-colors ${
+                  rankingTab === 'conversion' ? 'bg-amber-50 border-amber-100 text-amber-500 dark:bg-amber-900/20 dark:border-amber-800' : 
+                  rankingTab === 'usage' ? 'bg-rose-50 border-rose-100 text-rose-500 dark:bg-rose-900/20 dark:border-rose-800' :
+                  'bg-emerald-50 border-emerald-100 text-emerald-500 dark:bg-emerald-900/20 dark:border-emerald-800'
+                }`}>
+                  {rankingTab === 'conversion' ? <TrophyIcon className="w-4 h-4" /> : 
+                   rankingTab === 'usage' ? <FireIcon className="w-4 h-4" /> :
+                   <CheckCircleIcon className="w-4 h-4" />}
                 </div>
                 <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
-                  {rankingTab === 'conversion' ? '转化排行榜' : '勤奋排行榜'}
+                  {rankingTab === 'conversion' ? '转化排行榜' : 
+                   rankingTab === 'usage' ? '勤奋排行榜' :
+                   '通过率排行'}
                 </h2>
               </div>
               <div className="flex bg-slate-100 dark:bg-slate-700/50 rounded-lg p-1">
                 <button
                   onClick={() => setRankingTab('conversion')}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'conversion' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'conversion' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
                   转化
                 </button>
                 <button
                   onClick={() => setRankingTab('usage')}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'usage' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'usage' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
                   勤奋
+                </button>
+                <button
+                  onClick={() => setRankingTab('passRate')}
+                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'passRate' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                >
+                  通过率
                 </button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-              {(rankingTab === 'conversion' ? adminData.usersConversionRanking : adminData.usersUsageRanking).map((item: any, index: number) => (
-                <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-700/30 mb-2 last:mb-0 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className={`
-                      w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow-sm
-                      ${index === 0 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 ring-1 ring-yellow-200 dark:ring-yellow-500/30' : 
-                        index === 1 ? 'bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-300 ring-1 ring-slate-300 dark:ring-slate-500' : 
-                        index === 2 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400 ring-1 ring-orange-200 dark:ring-orange-500/30' : 
-                        'bg-white text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-600'}
-                    `}>
-                      {index + 1}
+              {(() => {
+                let data = [];
+                if (rankingTab === 'conversion') {
+                  data = adminData.usersConversionRanking;
+                } else if (rankingTab === 'usage') {
+                  data = adminData.usersUsageRanking;
+                } else {
+                  data = [...adminData.usersConversionRanking]
+                    .map((u: any) => ({
+                      ...u,
+                      rate: u.count > 0 ? (u.pass_count / u.count) * 100 : 0
+                    }))
+                    .sort((a: any, b: any) => b.rate - a.rate);
+                }
+
+                return data.map((item: any, index: number) => (
+                  <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-700/30 mb-2 last:mb-0 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className={`
+                        w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow-sm
+                        ${index === 0 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 ring-1 ring-yellow-200 dark:ring-yellow-500/30' : 
+                          index === 1 ? 'bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-300 ring-1 ring-slate-300 dark:ring-slate-500' : 
+                          index === 2 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400 ring-1 ring-orange-200 dark:ring-orange-500/30' : 
+                          'bg-white text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-600'}
+                      `}>
+                        {index + 1}
+                      </div>
+                      <span className={`text-sm font-medium ${index < 3 ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
+                        {item.user}
+                      </span>
                     </div>
-                    <span className={`text-sm font-medium ${index < 3 ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
-                      {item.user}
+                    <span className={`text-sm font-bold ${index < 3 ? (
+                      rankingTab === 'conversion' ? 'text-blue-600 dark:text-blue-400' : 
+                      rankingTab === 'usage' ? 'text-rose-600 dark:text-rose-400' :
+                      'text-emerald-600 dark:text-emerald-400'
+                    ) : 'text-slate-600 dark:text-slate-400'}`}>
+                      {rankingTab === 'passRate' ? `${item.rate.toFixed(1)}%` : item.count}
                     </span>
                   </div>
-                  <span className={`text-sm font-bold ${index < 3 ? (rankingTab === 'conversion' ? 'text-blue-600 dark:text-blue-400' : 'text-rose-600 dark:text-rose-400') : 'text-slate-600 dark:text-slate-400'}`}>
-                    {item.count}
-                  </span>
-                </div>
-              ))}
+                ));
+              })()}
             </div>
           </div>
         </div>
@@ -655,6 +711,25 @@ export default function Dashboard({
             </div>
             <TrendIndicator current={todayConversion?.count || 0} previous={yesterdayConversion?.count || 0} />
             
+            <div className="mt-4 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/30 p-2 rounded-md border border-slate-100 dark:border-slate-700">
+              <div className="flex items-center">
+                <CheckCircleIcon className="w-3 h-3 mr-2 text-emerald-500" />
+                <span>通过: </span>
+                <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
+                  {todayConversion?.pass_count || 0}
+                </span>
+              </div>
+              <div className="flex items-center">
+                <span>率: </span>
+                <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
+                  {todayConversion?.count > 0
+                    ? (((todayConversion?.pass_count || 0) / todayConversion.count) * 100).toFixed(1)
+                    : 0}
+                  %
+                </span>
+              </div>
+            </div>
+
             <button
               onClick={() => setIsModalOpen(true)}
               className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors flex items-center justify-center gap-2 shadow-sm hover:shadow-md active:scale-[0.98] text-sm"
@@ -716,7 +791,12 @@ export default function Dashboard({
                     <span>转化登记</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-900 dark:text-white">+{conv.count}</span>
+                    <div className="flex flex-col items-end">
+                      <span className="font-medium text-slate-900 dark:text-white">+{conv.count}</span>
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                        (通{conv.pass_count || 0})
+                      </span>
+                    </div>
                     <span className="text-xs text-slate-400">{new Date(conv.date).toLocaleDateString()}</span>
                   </div>
                 </div>
@@ -905,6 +985,23 @@ export default function Dashboard({
                       required
                       className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700/50 text-slate-900 dark:text-white px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
                       placeholder="请输入数量"
+                    />
+                  </div>
+                  <div className="mb-6">
+                    <label
+                      htmlFor="passCount"
+                      className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
+                    >
+                      通过数量
+                    </label>
+                    <input
+                      type="number"
+                      name="passCount"
+                      id="passCount"
+                      defaultValue={todayConversion?.pass_count}
+                      min="0"
+                      className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700/50 text-slate-900 dark:text-white px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      placeholder="请输入通过数量"
                     />
                   </div>
                   {actionData?.error && (

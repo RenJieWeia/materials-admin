@@ -5,6 +5,7 @@ export interface DailyConversion {
   user_id: number;
   date: string;
   count: number;
+  pass_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -12,16 +13,18 @@ export interface DailyConversion {
 export async function recordConversion(
   userId: number,
   date: string,
-  count: number
+  count: number,
+  passCount: number
 ) {
   const stmt = db.prepare(`
-    INSERT INTO daily_conversions (user_id, date, count, updated_at)
-    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO daily_conversions (user_id, date, count, pass_count, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(user_id, date) DO UPDATE SET
       count = excluded.count,
+      pass_count = excluded.pass_count,
       updated_at = CURRENT_TIMESTAMP
   `);
-  return stmt.run(userId, date, count);
+  return stmt.run(userId, date, count, passCount);
 }
 
 export async function getConversion(userId: number, date: string) {
@@ -34,11 +37,11 @@ export async function getConversion(userId: number, date: string) {
 
 export async function getSystemTotalConversion(date: string) {
   const stmt = db.prepare(`
-    SELECT SUM(count) as count FROM daily_conversions
+    SELECT SUM(count) as count, SUM(pass_count) as pass_count FROM daily_conversions
     WHERE date = ?
   `);
-  const result = stmt.get(date) as { count: number } | undefined;
-  return result?.count || 0;
+  const result = stmt.get(date) as { count: number; pass_count: number } | undefined;
+  return { count: result?.count || 0, pass_count: result?.pass_count || 0 };
 }
 
 export async function getConversions(
@@ -67,7 +70,7 @@ export async function getConversions(
 
 export async function getAllConversions(startDate: string, endDate: string) {
   const query = `
-    SELECT date, SUM(count) as count
+    SELECT date, SUM(count) as count, SUM(pass_count) as pass_count
     FROM daily_conversions
     WHERE date >= ? AND date <= ?
     GROUP BY date
@@ -76,6 +79,7 @@ export async function getAllConversions(startDate: string, endDate: string) {
   return db.prepare(query).all(startDate, endDate) as {
     date: string;
     count: number;
+    pass_count: number;
   }[];
 }
 
@@ -85,7 +89,7 @@ export async function getTopUsersByConversion(
   limit: number = 5
 ) {
   const query = `
-    SELECT u.name as user, SUM(dc.count) as count
+    SELECT u.name as user, SUM(dc.count) as count, SUM(dc.pass_count) as pass_count
     FROM daily_conversions dc
     JOIN users u ON dc.user_id = u.id
     WHERE dc.date >= ? AND dc.date <= ?
@@ -96,6 +100,7 @@ export async function getTopUsersByConversion(
   return db.prepare(query).all(startDate, endDate, limit) as {
     user: string;
     count: number;
+    pass_count: number;
   }[];
 }
 
@@ -104,7 +109,7 @@ export async function getAllUsersByConversion(
   endDate: string
 ) {
   const query = `
-    SELECT u.name as user, SUM(dc.count) as count
+    SELECT u.name as user, SUM(dc.count) as count, SUM(dc.pass_count) as pass_count
     FROM daily_conversions dc
     JOIN users u ON dc.user_id = u.id
     WHERE dc.date >= ? AND dc.date <= ?
@@ -114,12 +119,14 @@ export async function getAllUsersByConversion(
   return db.prepare(query).all(startDate, endDate) as {
     user: string;
     count: number;
+    pass_count: number;
   }[];
 }
 
 export async function getAllUserConversions(
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  userId?: number
 ) {
   let query = `
     SELECT dc.*, u.name as user_name, u.real_name
@@ -137,6 +144,11 @@ export async function getAllUserConversions(
   if (endDate) {
     conditions.push(`dc.date <= ?`);
     params.push(endDate);
+  }
+
+  if (userId) {
+    conditions.push(`dc.user_id = ?`);
+    params.push(userId);
   }
 
   if (conditions.length > 0) {

@@ -103,6 +103,17 @@ try {
   console.error("Migration failed:", error);
 }
 
+// Migration: Add pass_count column to daily_conversions if it doesn't exist
+try {
+  const tableInfo = db.pragma("table_info(daily_conversions)") as any[];
+  const hasPassCount = tableInfo.some((col) => col.name === "pass_count");
+  if (!hasPassCount) {
+    db.prepare("ALTER TABLE daily_conversions ADD COLUMN pass_count INTEGER DEFAULT 0").run();
+  }
+} catch (error) {
+  console.error("Migration failed:", error);
+}
+
 // 插入示例数据（如果表是空的）
 const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as {
   count: number;
