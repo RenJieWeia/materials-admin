@@ -1,9 +1,17 @@
 import { db } from "../server/db.server";
 import type { Material } from "../../types";
 
-export async function getUniqueGameNames() {
-  const query = `SELECT DISTINCT game_name FROM materials WHERE game_name IS NOT NULL AND game_name != '' ORDER BY game_name ASC`;
-  return (db.prepare(query).all() as { game_name: string }[]).map(
+export async function getUniqueGameNames(status?: string) {
+  let query = `SELECT DISTINCT game_name FROM materials WHERE game_name IS NOT NULL AND game_name != ''`;
+  const params: any[] = [];
+
+  if (status && status !== "全部") {
+    query += ` AND status = ?`;
+    params.push(status);
+  }
+
+  query += ` ORDER BY game_name ASC`;
+  return (db.prepare(query).all(...params) as { game_name: string }[]).map(
     (r) => r.game_name
   );
 }

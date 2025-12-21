@@ -22,7 +22,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const game_name = url.searchParams.get("game_name") || undefined;
   const account_name = url.searchParams.get("account_name") || undefined;
-  const status = url.searchParams.get("status") || undefined;
+  
+  const statusParam = url.searchParams.get("status");
+  const status = statusParam === null ? "空闲" : (statusParam || undefined);
+
   const filterUser = url.searchParams.get("user") || undefined;
   const filterUserRealName = url.searchParams.get("user_real_name") || undefined;
   const startDate = url.searchParams.get("startDate") || undefined;
@@ -32,7 +35,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const limit = parseInt(url.searchParams.get("limit") || "10");
 
   const [gameNames, allUsers] = await Promise.all([
-    getUniqueGameNames(),
+    getUniqueGameNames(status),
     getAllUsers(),
   ]);
 
@@ -97,9 +100,20 @@ export async function action({ request }: Route.ActionArgs) {
     const sheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(sheet) as any[];
 
+    const userId = await requireUserId(request);
+    const currentUser = await getUserById(userId);
+    if (!currentUser) return { error: "User not found" };
+
+    const allUsers = await getAllUsers();
+    const validUsernames = new Set(allUsers.map((u) => u.name));
+
     let count = 0;
     let skipped = 0;
     const skippedAccounts: string[] = [];
+    let invalidStatusCount = 0;
+    const invalidStatusAccounts: string[] = [];
+    let invalidUserCount = 0;
+    const invalidUserAccounts: string[] = [];
 
     for (const row of data) {
       // 假设 Excel 列名为：游戏名称, 账户名称
@@ -111,13 +125,54 @@ export async function action({ request }: Route.ActionArgs) {
           continue;
         }
 
+        let status = row["使用状态"] || row["状态"] || "空闲";
+        if (status !== "空闲" && status !== "已使用") {
+          invalidStatusCount++;
+          invalidStatusAccounts.push(row["账户名称"]);
+          continue;
+        }
+
+        let user = row["使用人"];
+        let usage_time = row["使用时间"];
+
+        if (status === "空闲") {
+          user = null;
+          usage_time = null;
+        } else if (status === "已使用") {
+          if (!user) {
+            user = currentUser.name;
+          }
+          
+          if (!validUsernames.has(user)) {
+            invalidUserCount++;
+            invalidUserAccounts.push(row["账户名称"]);
+            continue;
+          }
+
+          if (!usage_time) {
+            const date = new Date();
+            usage_time =
+              date.getFullYear() +
+              "-" +
+              String(date.getMonth() + 1).padStart(2, "0") +
+              "-" +
+              String(date.getDate()).padStart(2, "0") +
+              " " +
+              String(date.getHours()).padStart(2, "0") +
+              ":" +
+              String(date.getMinutes()).padStart(2, "0") +
+              ":" +
+              String(date.getSeconds()).padStart(2, "0");
+          }
+        }
+
         await createMaterial({
           game_name: row["游戏名称"],
           account_name: row["账户名称"],
           description: row["描述"],
-          status: row["状态"] || "空闲",
-          user: row["使用人"],
-          usage_time: row["使用时间"],
+          status: status,
+          user: user,
+          usage_time: usage_time,
         });
         count++;
       }
@@ -129,6 +184,20 @@ export async function action({ request }: Route.ActionArgs) {
       if (skippedAccounts.length > 0) {
          const displayedAccounts = skippedAccounts.slice(0, 3).join(", ");
          message += ` (重复账号: ${displayedAccounts}${skippedAccounts.length > 3 ? ' 等' : ''})`;
+      }
+    }
+    if (invalidStatusCount > 0) {
+      message += `，跳过 ${invalidStatusCount} 条状态异常数据`;
+      if (invalidStatusAccounts.length > 0) {
+        const displayedAccounts = invalidStatusAccounts.slice(0, 3).join(", ");
+        message += ` (异常账号: ${displayedAccounts}${invalidStatusAccounts.length > 3 ? ' 等' : ''})`;
+      }
+    }
+    if (invalidUserCount > 0) {
+      message += `，跳过 ${invalidUserCount} 条使用人异常数据`;
+      if (invalidUserAccounts.length > 0) {
+        const displayedAccounts = invalidUserAccounts.slice(0, 3).join(", ");
+        message += ` (异常账号: ${displayedAccounts}${invalidUserAccounts.length > 3 ? ' 等' : ''})`;
       }
     }
 
