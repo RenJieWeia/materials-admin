@@ -455,6 +455,7 @@ export default function Materials({
               <select
                 name="status"
                 defaultValue={filters.status || ""}
+                onChange={(e) => submit(e.currentTarget.form)}
                 className="w-full appearance-none rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700/50 text-slate-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-shadow"
               >
                 <option value="">全部</option>
