@@ -3,15 +3,15 @@ import { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { ArrowDownTrayIcon, DocumentArrowUpIcon, MagnifyingGlassIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { Route } from "./+types/materials";
-import { requireUserId } from "./server/session.server";
-import { getUserById, getAllUsers } from "./model/user.server";
+import { requireUserId } from "../core/session.server";
+import { getUserById, getAllUsers } from "../services/user.server";
 import {
   getMaterials,
   createMaterial,
   claimMaterial,
   getUniqueGameNames,
   getMaterialByAccountName,
-} from "./model/material.server";
+} from "../services/material.server";
 import Pagination from "../components/Pagination";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -139,10 +139,6 @@ export async function action({ request }: Route.ActionArgs) {
           user = null;
           usage_time = null;
         } else if (status === "已使用") {
-          if (!user) {
-            user = currentUser.name;
-          }
-          
           if (!validUsernames.has(user)) {
             invalidUserCount++;
             invalidUserAccounts.push(row["账户名称"]);

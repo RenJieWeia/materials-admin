@@ -2,8 +2,8 @@ import { Form, useNavigation, redirect, useSearchParams } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import { UserPlusIcon, MagnifyingGlassIcon, ArrowPathIcon, PencilSquareIcon, KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
 import type { Route } from "./+types/users";
-import { getUsers, createUser, updateUserPassword, getUserById, deleteUser, updateUserProfile } from "./model/user.server";
-import { requireUserId } from "./server/session.server";
+import { getUsers, createUser, updateUserPassword, getUserById, deleteUser, updateUserProfile } from "../services/user.server";
+import { requireUserId } from "../core/session.server";
 import Pagination from "../components/Pagination";
 
 export async function loader({ request }: Route.LoaderArgs) {

@@ -20,9 +20,9 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { requireUserId } from "./server/session.server";
-import { getConversions, getAllUserConversions } from "./model/conversion.server";
-import { getUserById, getAllUsers } from "./model/user.server";
+import { requireUserId } from "../core/session.server";
+import { getConversions, getAllUserConversions } from "../services/conversion.server";
+import { getUserById, getAllUsers } from "../services/user.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);

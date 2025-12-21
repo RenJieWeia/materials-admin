@@ -9,8 +9,8 @@ import {
 } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import type { Route } from "./+types/dashboard";
-import { requireUserId } from "./server/session.server";
-import { getUserById } from "./model/user.server";
+import { requireUserId } from "../core/session.server";
+import { getUserById } from "../services/user.server";
 import {
   recordConversion,
   getConversion,
@@ -18,7 +18,7 @@ import {
   getAllConversions,
   getAllUsersByConversion,
   getSystemTotalConversion,
-} from "./model/conversion.server";
+} from "../services/conversion.server";
 import {
   getMaterialUsageStats,
   getTodayUsageCount,
@@ -30,13 +30,13 @@ import {
   getMaterialGameStats,
   getIdleMaterialGameStats,
   getUserMaterialGameStats,
-} from "./model/material.server";
+} from "../services/material.server";
 import {
   getTodos,
   createTodo,
   toggleTodo,
   deleteTodo,
-} from "./model/todo.server";
+} from "../services/todo.server";
 import {
   LineChart,
   Line,
@@ -683,7 +683,7 @@ export default function Dashboard({
             工作台
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            欢迎回来，{user.username}
+            欢迎回来，{user.name}
           </p>
         </div>
         <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
@@ -722,8 +722,8 @@ export default function Dashboard({
               <div className="flex items-center">
                 <span>率: </span>
                 <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
-                  {todayConversion?.count > 0
-                    ? (((todayConversion?.pass_count || 0) / todayConversion.count) * 100).toFixed(1)
+                  {todayConversion && todayConversion.count > 0
+                    ? (((todayConversion.pass_count || 0) / todayConversion.count) * 100).toFixed(1)
                     : 0}
                   %
                 </span>

@@ -1,7 +1,7 @@
 import { Form, redirect, useNavigation } from "react-router";
-import { createUserSession, getUserId } from "./server/session.server";
+import { createUserSession, getUserId } from "../core/session.server";
 import type { Route } from "./+types/login";
-import { verifyLogin } from "./model/user.server";
+import { verifyLogin } from "../services/user.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
   if (await getUserId(request)) {

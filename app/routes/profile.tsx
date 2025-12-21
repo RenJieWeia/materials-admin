@@ -1,7 +1,7 @@
 import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
 import { useEffect, useRef } from "react";
-import { requireUserId } from "./server/session.server";
-import { getUserById, updateUserProfile, updateUserPassword } from "./model/user.server";
+import { requireUserId } from "../core/session.server";
+import { getUserById, updateUserProfile, updateUserPassword } from "../services/user.server";
 import type { Route } from "./+types/profile";
 import { UserCircleIcon, KeyIcon, CheckCircleIcon, ExclamationCircleIcon } from "@heroicons/react/24/outline";
 

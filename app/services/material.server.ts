@@ -1,5 +1,5 @@
-import { db } from "../server/db.server";
-import type { Material } from "../../types";
+import { db } from "../core/db.server";
+import type { Material } from "../types";
 
 export async function getUniqueGameNames(status?: string) {
   let query = `SELECT DISTINCT game_name FROM materials WHERE game_name IS NOT NULL AND game_name != ''`;

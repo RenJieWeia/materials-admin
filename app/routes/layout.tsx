@@ -1,7 +1,7 @@
 import { NavLink, Outlet, Form, Link } from "react-router";
 import type { Route } from "./+types/layout";
-import { requireUserId } from "./server/session.server";
-import { getUserById } from "./model/user.server";
+import { requireUserId } from "../core/session.server";
+import { getUserById } from "../services/user.server";
 import { useTheme } from "../components/ThemeProvider";
 import { MoonIcon, SunIcon } from "@heroicons/react/24/outline";
 
