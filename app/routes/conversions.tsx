@@ -23,6 +23,7 @@ import {
 import { requireUserId } from "../core/session.server";
 import { getConversions, getAllUserConversions } from "../services/conversion.server";
 import { getUserById, getAllUsers } from "../services/user.server";
+import { getMaterialUsageStats, getAllUserDailyUsageStats } from "../services/material.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const userId = await requireUserId(request);
@@ -39,19 +40,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   let conversions;
   let allUsers: any[] = [];
+  let usageStats: any[] = [];
 
   if (user.role === "admin") {
     conversions = await getAllUserConversions(startDate, endDate, filterUserId);
     allUsers = await getAllUsers();
+    usageStats = await getAllUserDailyUsageStats(startDate, endDate);
   } else {
     conversions = await getConversions(Number(userId), startDate, endDate);
+    usageStats = await getMaterialUsageStats(user.name, startDate, endDate);
   }
   
-  return { conversions, user, allUsers };
+  return { conversions, user, allUsers, usageStats };
 }
 
 export default function Conversions() {
-  const { conversions, user, allUsers } = useLoaderData<typeof loader>();
+  const { conversions, user, allUsers, usageStats } = useLoaderData<typeof loader>();
   const isAdmin = user.role === "admin";
   const [searchParams] = useSearchParams();
   const submit = useSubmit();
@@ -340,6 +344,9 @@ export default function Conversions() {
                     通过数量
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    转化率
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     通过率
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -370,9 +377,26 @@ export default function Conversions() {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
-                        {conversion.count > 0
-                          ? (((conversion.pass_count || 0) / conversion.count) * 100).toFixed(1)
+                        {(conversion.pass_count || 0) > 0
+                          ? ((conversion.count / (conversion.pass_count || 0)) * 100).toFixed(1)
                           : 0}
+                        %
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
+                        {(() => {
+                          let usageCount = 0;
+                          if (isAdmin) {
+                            const stat = (usageStats as any[]).find((u: any) => u.date === conversion.date && u.user === ((conversion as any).user_name));
+                            usageCount = stat ? stat.count : 0;
+                          } else {
+                            const stat = (usageStats as any[]).find((u: any) => u.date === conversion.date);
+                            usageCount = stat ? stat.count : 0;
+                          }
+                          
+                          return usageCount > 0
+                            ? (((conversion.pass_count || 0) / usageCount) * 100).toFixed(1)
+                            : 0;
+                        })()}
                         %
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500 dark:text-slate-400">

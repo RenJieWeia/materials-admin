@@ -106,9 +106,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     d.setDate(d.getDate() + 1)
   ) {
     const dateStr = d.toLocaleDateString('en-CA');
-    const conv = conversions.find((c) => c.date === dateStr)?.count || 0;
+    const convObj = conversions.find((c) => c.date === dateStr);
+    const conv = convObj?.count || 0;
+    const pass = convObj?.pass_count || 0;
     const usage = usageStats.find((u) => u.date === dateStr)?.count || 0;
-    const rate = usage > 0 ? parseFloat((conv / usage).toFixed(2)) : 0;
+    const rate = pass > 0 ? parseFloat(((conv / pass) * 100).toFixed(2)) : 0;
 
     chartData.push({
       date: dateStr,
@@ -148,9 +150,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       d.setDate(d.getDate() + 1)
     ) {
       const dateStr = d.toLocaleDateString('en-CA');
-      const conv = allConversions.find((c) => c.date === dateStr)?.count || 0;
+      const convObj = allConversions.find((c) => c.date === dateStr);
+      const conv = convObj?.count || 0;
+      const pass = convObj?.pass_count || 0;
       const usage = allUsage.find((u) => u.date === dateStr)?.count || 0;
-      const rate = usage > 0 ? parseFloat((conv / usage).toFixed(2)) : 0;
+      const rate = pass > 0 ? parseFloat(((conv / pass) * 100).toFixed(2)) : 0;
 
       adminChartData.push({
         date: dateStr,
@@ -334,8 +338,8 @@ export default function Dashboard({
               <div className="flex items-center">
                 <span>率: </span>
                 <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
-                  {adminData.systemTodayConversion.count > 0
-                    ? ((adminData.systemTodayConversion.pass_count / adminData.systemTodayConversion.count) * 100).toFixed(1)
+                  {adminData.systemTodayUsage > 0
+                    ? ((adminData.systemTodayConversion.pass_count / adminData.systemTodayUsage) * 100).toFixed(1)
                     : 0}
                   %
                 </span>
@@ -361,8 +365,8 @@ export default function Dashboard({
               <div>
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日转化率</p>
                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
-                  {adminData.systemTodayUsage > 0 
-                    ? ((adminData.systemTodayConversion.count / adminData.systemTodayUsage) * 100).toFixed(1) 
+                  {adminData.systemTodayConversion.pass_count > 0 
+                    ? ((adminData.systemTodayConversion.count / adminData.systemTodayConversion.pass_count) * 100).toFixed(1) 
                     : 0}%
                 </h3>
               </div>
@@ -635,10 +639,14 @@ export default function Dashboard({
                   data = adminData.usersUsageRanking;
                 } else {
                   data = [...adminData.usersConversionRanking]
-                    .map((u: any) => ({
-                      ...u,
-                      rate: u.count > 0 ? (u.pass_count / u.count) * 100 : 0
-                    }))
+                    .map((u: any) => {
+                      const usageUser = adminData.usersUsageRanking.find((usage: any) => usage.user === u.user);
+                      const usageCount = usageUser ? usageUser.count : 0;
+                      return {
+                        ...u,
+                        rate: usageCount > 0 ? (u.pass_count / usageCount) * 100 : 0
+                      };
+                    })
                     .sort((a: any, b: any) => b.rate - a.rate);
                 }
 
@@ -722,8 +730,8 @@ export default function Dashboard({
               <div className="flex items-center">
                 <span>率: </span>
                 <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
-                  {todayConversion && todayConversion.count > 0
-                    ? (((todayConversion.pass_count || 0) / todayConversion.count) * 100).toFixed(1)
+                  {todayUsageCount > 0
+                    ? (((todayConversion?.pass_count || 0) / todayUsageCount) * 100).toFixed(1)
                     : 0}
                   %
                 </span>
@@ -763,8 +771,8 @@ export default function Dashboard({
               <ArrowTrendingUpIcon className="w-3 h-3 mr-2 text-slate-400" />
               <span>今日转化率: </span>
               <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
-                {todayUsageCount > 0
-                  ? (((todayConversion?.count || 0) / todayUsageCount) * 100).toFixed(1)
+                {(todayConversion?.pass_count || 0) > 0
+                  ? (((todayConversion?.count || 0) / (todayConversion?.pass_count || 0)) * 100).toFixed(1)
                   : 0}
                 %
               </span>

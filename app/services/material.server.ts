@@ -242,17 +242,30 @@ export async function deleteMaterial(id: number) {
 
 export async function getMaterialUsageStats(
   username: string,
-  startDate: string,
-  endDate: string
+  startDate?: string,
+  endDate?: string
 ) {
-  const query = `
+  let query = `
     SELECT date(usage_time) as date, COUNT(*) as count
     FROM materials
-    WHERE user = ? AND date(usage_time) >= ? AND date(usage_time) <= ?
+    WHERE user = ?
+  `;
+  const params: any[] = [username];
+
+  if (startDate) {
+    query += ` AND date(usage_time) >= ?`;
+    params.push(startDate);
+  }
+  if (endDate) {
+    query += ` AND date(usage_time) <= ?`;
+    params.push(endDate);
+  }
+
+  query += `
     GROUP BY date(usage_time)
     ORDER BY date ASC
   `;
-  return db.prepare(query).all(username, startDate, endDate) as {
+  return db.prepare(query).all(...params) as {
     date: string;
     count: number;
   }[];
@@ -347,6 +360,36 @@ export async function getAllUsersByUsage(
   `;
   return db.prepare(query).all(startDate, endDate) as {
     user: string;
+    count: number;
+  }[];
+}
+
+export async function getAllUserDailyUsageStats(
+  startDate?: string,
+  endDate?: string
+) {
+  let query = `
+    SELECT user, date(usage_time) as date, COUNT(*) as count
+    FROM materials
+    WHERE user IS NOT NULL
+  `;
+  const params: any[] = [];
+
+  if (startDate) {
+    query += ` AND date(usage_time) >= ?`;
+    params.push(startDate);
+  }
+  if (endDate) {
+    query += ` AND date(usage_time) <= ?`;
+    params.push(endDate);
+  }
+
+  query += `
+    GROUP BY user, date(usage_time)
+  `;
+  return db.prepare(query).all(...params) as {
+    user: string;
+    date: string;
     count: number;
   }[];
 }
