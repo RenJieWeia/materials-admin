@@ -203,8 +203,8 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: "请输入有效的数量" };
     }
 
-    if (passCount < 0 || passCount > count) {
-      return { error: "通过数量不能小于0或大于转化数量" };
+    if (passCount < 0 || count > passCount) {
+      return { error: "转化数量不能大于通过数量" };
     }
 
     await recordConversion(Number(userId), date, count, passCount);
