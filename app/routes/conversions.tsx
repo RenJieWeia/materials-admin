@@ -413,7 +413,7 @@ export default function Conversions() {
                         %
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
-                        {new Date(conversion.updated_at).toLocaleString('zh-CN')}
+                        {new Date(conversion.updated_at.replace(" ", "T") + "Z").toLocaleString('zh-CN')}
                       </td>
                     </tr>
                   ))
