@@ -1,7 +1,7 @@
 import { Form, useNavigation, useSubmit, useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
-import { ArrowDownTrayIcon, DocumentArrowUpIcon, MagnifyingGlassIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, DocumentArrowUpIcon, MagnifyingGlassIcon, ArrowPathIcon, ArchiveBoxIcon } from "@heroicons/react/24/outline";
 import type { Route } from "./+types/materials";
 import { requireUserId } from "../core/session.server";
 import { getUserById, getAllUsers } from "../services/user.server";
@@ -342,9 +342,14 @@ export default function Materials({
   return (
     <div className="p-8 container mx-auto min-h-screen bg-gray-50/50 dark:bg-gray-900 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">物资管理</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">管理游戏账号与物资分配</p>
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-600 rounded-lg shadow-sm">
+            <ArchiveBoxIcon className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">物资管理</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">管理游戏账号与物资分配</p>
+          </div>
         </div>
         <div className="flex gap-3">
           <a

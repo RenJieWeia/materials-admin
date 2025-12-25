@@ -4,7 +4,7 @@ import { requireUserId } from "../core/session.server";
 import { getUserById } from "../services/user.server";
 import Pagination from "../components/Pagination";
 import type { Route } from "./+types/audit";
-import { FunnelIcon, ArrowPathIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { FunnelIcon, ArrowPathIcon, MagnifyingGlassIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireUserId(request);
@@ -62,9 +62,14 @@ export default function AuditLogs() {
   return (
     <div className="p-8 container mx-auto min-h-screen bg-gray-50/50 dark:bg-gray-900 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">操作审计</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">查看系统关键操作记录</p>
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-600 rounded-lg shadow-sm">
+            <ShieldCheckIcon className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">操作审计</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">查看系统关键操作记录</p>
+          </div>
         </div>
       </div>
 
@@ -159,6 +164,13 @@ export default function AuditLogs() {
           </div>
 
           <div className="flex items-end gap-3">
+            <button
+              type="submit"
+              className="flex-1 inline-flex justify-center items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+            >
+              <MagnifyingGlassIcon className="w-4 h-4 mr-2" />
+              搜索
+            </button>
             <button
               type="button"
               onClick={() => {

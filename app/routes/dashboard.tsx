@@ -69,6 +69,7 @@ import {
   ListBulletIcon,
   TrashIcon,
   CheckCircleIcon,
+  Squares2X2Icon,
 } from "@heroicons/react/24/outline";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -350,13 +351,18 @@ export default function Dashboard({
     return (
       <div className="p-6 container mx-auto text-slate-800 dark:text-slate-200 space-y-6 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
         <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-4">
-          <div>
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-              管理工作台
-            </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              全平台数据概览与分析
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-600 rounded-lg shadow-sm">
+              <Squares2X2Icon className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+                管理工作台
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                全平台数据概览与分析
+              </p>
+            </div>
           </div>
           <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
             {new Date().toLocaleDateString("zh-CN", {
@@ -892,13 +898,18 @@ export default function Dashboard({
   return (
     <div className="p-6 container mx-auto text-slate-800 dark:text-slate-200 space-y-6 bg-gray-50/50 dark:bg-gray-900 min-h-screen">
       <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-            工作台
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            欢迎回来，{user.name}
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-600 rounded-lg shadow-sm">
+            <Squares2X2Icon className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+              工作台
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              欢迎回来，{user.name}
+            </p>
+          </div>
         </div>
         <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
           {new Date().toLocaleDateString("zh-CN", {

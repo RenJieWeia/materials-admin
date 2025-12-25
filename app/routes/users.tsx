@@ -1,6 +1,6 @@
 import { Form, useNavigation, redirect, useSearchParams } from "react-router";
 import { useState, useEffect, useRef } from "react";
-import { UserPlusIcon, MagnifyingGlassIcon, ArrowPathIcon, PencilSquareIcon, KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { UserPlusIcon, MagnifyingGlassIcon, ArrowPathIcon, PencilSquareIcon, KeyIcon, TrashIcon, UsersIcon } from "@heroicons/react/24/outline";
 import type { Route } from "./+types/users";
 import { getUsers, createUser, updateUserPassword, getUserById, deleteUser, updateUserProfile } from "../services/user.server";
 import { requireUserId } from "../core/session.server";
@@ -175,9 +175,14 @@ export default function Users({
   return (
     <div className="p-8 container mx-auto min-h-screen bg-gray-50/50 dark:bg-gray-900 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">账户管理</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">管理系统用户与权限</p>
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-600 rounded-lg shadow-sm">
+            <UsersIcon className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">账户管理</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">管理系统用户与权限</p>
+          </div>
         </div>
         <button
           onClick={() => setIsAddModalOpen(true)}
