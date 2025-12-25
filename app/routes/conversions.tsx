@@ -61,7 +61,7 @@ export default function Conversions() {
   const submit = useSubmit();
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar');
-  const [metricType, setMetricType] = useState<'count' | 'pass_count'>('count');
+  const [metricType, setMetricType] = useState<'count' | 'pass_count' | 'usage_count'>('count');
 
   const isAllUsers = isAdmin && !searchParams.get("userId");
 
@@ -75,7 +75,13 @@ export default function Conversions() {
           acc[date] = { date };
         }
         const userName = curr.real_name || curr.user_name || 'Unknown';
-        acc[date][userName] = metricType === 'count' ? curr.count : (curr.pass_count || 0);
+        
+        let value = 0;
+        if (metricType === 'count') value = curr.count;
+        else if (metricType === 'pass_count') value = curr.pass_count || 0;
+        else if (metricType === 'usage_count') value = curr.usage_count || 0;
+        
+        acc[date][userName] = value;
         return acc;
       }, {});
       
@@ -202,6 +208,16 @@ export default function Conversions() {
                   >
                     通过数
                   </button>
+                  <button
+                    onClick={() => setMetricType('usage_count')}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+                      metricType === 'usage_count' 
+                        ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' 
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    使用数
+                  </button>
                 </div>
               )}
               <div className="flex bg-slate-100 dark:bg-slate-700/50 rounded-lg p-1">
@@ -270,6 +286,7 @@ export default function Conversions() {
                     ))
                   ) : (
                     <>
+                      <Bar dataKey="usage_count" name="使用数量" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="count" name="转化数量" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="pass_count" name="通过数量" fill="#10b981" radius={[4, 4, 0, 0]} />
                     </>
@@ -314,6 +331,7 @@ export default function Conversions() {
                     ))
                   ) : (
                     <>
+                      <Line type="monotone" dataKey="usage_count" name="使用数量" stroke="#8b5cf6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                       <Line type="monotone" dataKey="count" name="转化数量" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                       <Line type="monotone" dataKey="pass_count" name="通过数量" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                     </>
@@ -369,17 +387,7 @@ export default function Conversions() {
                       )}
                       <td className="whitespace-nowrap px-6 py-4 text-sm">
                         <span className="inline-flex items-center rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                          {(() => {
-                            let usageCount = 0;
-                            if (isAdmin) {
-                              const stat = (usageStats as any[]).find((u: any) => u.date === conversion.date && u.user === ((conversion as any).user_name));
-                              usageCount = stat ? stat.count : 0;
-                            } else {
-                              const stat = (usageStats as any[]).find((u: any) => u.date === conversion.date);
-                              usageCount = stat ? stat.count : 0;
-                            }
-                            return usageCount;
-                          })()}
+                          {conversion.usage_count || 0}
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm">
@@ -399,20 +407,9 @@ export default function Conversions() {
                         %
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
-                        {(() => {
-                          let usageCount = 0;
-                          if (isAdmin) {
-                            const stat = (usageStats as any[]).find((u: any) => u.date === conversion.date && u.user === ((conversion as any).user_name));
-                            usageCount = stat ? stat.count : 0;
-                          } else {
-                            const stat = (usageStats as any[]).find((u: any) => u.date === conversion.date);
-                            usageCount = stat ? stat.count : 0;
-                          }
-                          
-                          return usageCount > 0
-                            ? (((conversion.pass_count || 0) / usageCount) * 100).toFixed(1)
-                            : 0;
-                        })()}
+                        {(conversion.usage_count || 0) > 0
+                          ? (((conversion.pass_count || 0) / (conversion.usage_count || 0)) * 100).toFixed(1)
+                          : 0}
                         %
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500 dark:text-slate-400">

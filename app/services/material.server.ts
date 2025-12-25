@@ -1,6 +1,6 @@
 import { db } from "../core/db.server";
 import type { Material } from "../types";
-import { incrementConversionCount } from "./conversion.server";
+import { incrementUsageCount } from "./conversion.server";
 
 
 export async function getUniqueGameNames(status?: string) {
@@ -155,7 +155,7 @@ export async function claimMaterial(id: number, username: string) {
   const user = db.prepare("SELECT id FROM users WHERE name = ?").get(username) as { id: number } | undefined;
   if (user) {
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
-    incrementConversionCount(user.id, today);
+    incrementUsageCount(user.id, today);
   }
 
   return { ...material, status: "已使用", user: username, usage_time: now };

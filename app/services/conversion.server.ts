@@ -6,6 +6,7 @@ export interface DailyConversion {
   date: string;
   count: number;
   pass_count: number;
+  usage_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -17,8 +18,8 @@ export async function recordConversion(
   passCount: number
 ) {
   const stmt = db.prepare(`
-    INSERT INTO daily_conversions (user_id, date, count, pass_count, updated_at)
-    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO daily_conversions (user_id, date, count, pass_count, usage_count, updated_at)
+    VALUES (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
     ON CONFLICT(user_id, date) DO UPDATE SET
       count = excluded.count,
       pass_count = excluded.pass_count,
@@ -29,8 +30,8 @@ export async function recordConversion(
 
 export async function incrementConversionCount(userId: number, date: string) {
   const stmt = db.prepare(`
-    INSERT INTO daily_conversions (user_id, date, count, pass_count, updated_at)
-    VALUES (?, ?, 1, 0, CURRENT_TIMESTAMP)
+    INSERT INTO daily_conversions (user_id, date, count, pass_count, usage_count, updated_at)
+    VALUES (?, ?, 1, 0, 0, CURRENT_TIMESTAMP)
     ON CONFLICT(user_id, date) DO UPDATE SET
       count = count + 1,
       updated_at = CURRENT_TIMESTAMP
@@ -38,6 +39,16 @@ export async function incrementConversionCount(userId: number, date: string) {
   return stmt.run(userId, date);
 }
 
+export async function incrementUsageCount(userId: number, date: string) {
+  const stmt = db.prepare(`
+    INSERT INTO daily_conversions (user_id, date, count, pass_count, usage_count, updated_at)
+    VALUES (?, ?, 0, 0, 1, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, date) DO UPDATE SET
+      usage_count = usage_count + 1,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  return stmt.run(userId, date);
+}
 
 export async function getConversion(userId: number, date: string) {
   const stmt = db.prepare(`
@@ -49,11 +60,11 @@ export async function getConversion(userId: number, date: string) {
 
 export async function getSystemTotalConversion(date: string) {
   const stmt = db.prepare(`
-    SELECT SUM(count) as count, SUM(pass_count) as pass_count FROM daily_conversions
+    SELECT SUM(count) as count, SUM(pass_count) as pass_count, SUM(usage_count) as usage_count FROM daily_conversions
     WHERE date = ?
   `);
-  const result = stmt.get(date) as { count: number; pass_count: number } | undefined;
-  return { count: result?.count || 0, pass_count: result?.pass_count || 0 };
+  const result = stmt.get(date) as { count: number; pass_count: number; usage_count: number } | undefined;
+  return { count: result?.count || 0, pass_count: result?.pass_count || 0, usage_count: result?.usage_count || 0 };
 }
 
 export async function getConversions(
@@ -82,7 +93,7 @@ export async function getConversions(
 
 export async function getAllConversions(startDate: string, endDate: string) {
   const query = `
-    SELECT date, SUM(count) as count, SUM(pass_count) as pass_count
+    SELECT date, SUM(count) as count, SUM(pass_count) as pass_count, SUM(usage_count) as usage_count
     FROM daily_conversions
     WHERE date >= ? AND date <= ?
     GROUP BY date
@@ -92,6 +103,7 @@ export async function getAllConversions(startDate: string, endDate: string) {
     date: string;
     count: number;
     pass_count: number;
+    usage_count: number;
   }[];
 }
 
@@ -101,7 +113,7 @@ export async function getTopUsersByConversion(
   limit: number = 5
 ) {
   const query = `
-    SELECT u.name as user, SUM(dc.count) as count, SUM(dc.pass_count) as pass_count
+    SELECT u.name as user, SUM(dc.count) as count, SUM(dc.pass_count) as pass_count, SUM(dc.usage_count) as usage_count
     FROM daily_conversions dc
     JOIN users u ON dc.user_id = u.id
     WHERE dc.date >= ? AND dc.date <= ?
@@ -113,6 +125,7 @@ export async function getTopUsersByConversion(
     user: string;
     count: number;
     pass_count: number;
+    usage_count: number;
   }[];
 }
 
@@ -121,7 +134,7 @@ export async function getAllUsersByConversion(
   endDate: string
 ) {
   const query = `
-    SELECT u.name as user, SUM(dc.count) as count, SUM(dc.pass_count) as pass_count
+    SELECT u.name as user, SUM(dc.count) as count, SUM(dc.pass_count) as pass_count, SUM(dc.usage_count) as usage_count
     FROM daily_conversions dc
     JOIN users u ON dc.user_id = u.id
     WHERE dc.date >= ? AND dc.date <= ?
@@ -132,6 +145,7 @@ export async function getAllUsersByConversion(
     user: string;
     count: number;
     pass_count: number;
+    usage_count: number;
   }[];
 }
 

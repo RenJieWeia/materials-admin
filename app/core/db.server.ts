@@ -122,6 +122,33 @@ try {
   if (!hasPassCount) {
     db.prepare("ALTER TABLE daily_conversions ADD COLUMN pass_count INTEGER DEFAULT 0").run();
   }
+  
+  const hasUsageCount = tableInfo.some((col) => col.name === "usage_count");
+  if (!hasUsageCount) {
+    db.prepare("ALTER TABLE daily_conversions ADD COLUMN usage_count INTEGER DEFAULT 0").run();
+    
+    // Backfill usage_count from materials table
+    console.log("Backfilling usage_count from materials table...");
+    const updateStmt = db.prepare(`
+      UPDATE daily_conversions
+      SET usage_count = (
+        SELECT COUNT(*)
+        FROM materials
+        JOIN users ON materials.user = users.name
+        WHERE users.id = daily_conversions.user_id
+        AND date(materials.usage_time) = daily_conversions.date
+      )
+      WHERE EXISTS (
+        SELECT 1
+        FROM materials
+        JOIN users ON materials.user = users.name
+        WHERE users.id = daily_conversions.user_id
+        AND date(materials.usage_time) = daily_conversions.date
+      )
+    `);
+    updateStmt.run();
+    console.log("Backfill complete.");
+  }
 } catch (error) {
   console.error("Migration failed:", error);
 }
