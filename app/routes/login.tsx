@@ -2,6 +2,7 @@ import { Form, redirect, useNavigation } from "react-router";
 import { createUserSession, getUserId } from "../core/session.server";
 import type { Route } from "./+types/login";
 import { verifyLogin } from "../services/user.server";
+import { createAuditLog } from "../services/audit.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
   if (await getUserId(request)) {
@@ -19,6 +20,16 @@ export async function action({ request }: Route.ActionArgs) {
   if (!user) {
     return { error: "Invalid username or password" };
   }
+
+  createAuditLog({
+    user_id: parseInt(user.id),
+    user_name: user.name,
+    action: "登录",
+    entity: "用户",
+    entity_id: user.id,
+    details: "用户登录系统",
+  }, request);
+
   return createUserSession(user.id, "/dashboard");
 }
 export default function Login({ actionData }: Route.ComponentProps) {

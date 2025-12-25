@@ -15,6 +15,7 @@ export default [
     route("users", "routes/users.tsx"),
     route("profile", "routes/profile.tsx"),
     route("conversions", "routes/conversions.tsx"),
+    route("audit", "routes/audit.tsx"),
   ]),
   route("resources/material-template", "routes/resources/material-template.ts"),
 ] satisfies RouteConfig;

@@ -90,6 +90,18 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    user_name TEXT,
+    action TEXT NOT NULL,
+    entity TEXT NOT NULL,
+    entity_id TEXT,
+    details TEXT,
+    ip_address TEXT,
+    created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
+  );
 `);
 
 // Migration: Add real_name column if it doesn't exist

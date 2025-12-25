@@ -27,6 +27,18 @@ export async function recordConversion(
   return stmt.run(userId, date, count, passCount);
 }
 
+export async function incrementConversionCount(userId: number, date: string) {
+  const stmt = db.prepare(`
+    INSERT INTO daily_conversions (user_id, date, count, pass_count, updated_at)
+    VALUES (?, ?, 1, 0, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, date) DO UPDATE SET
+      count = count + 1,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  return stmt.run(userId, date);
+}
+
+
 export async function getConversion(userId: number, date: string) {
   const stmt = db.prepare(`
     SELECT * FROM daily_conversions

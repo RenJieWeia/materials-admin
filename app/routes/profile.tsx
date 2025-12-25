@@ -2,6 +2,7 @@ import { Form, useActionData, useLoaderData, useNavigation } from "react-router"
 import { useEffect, useRef } from "react";
 import { requireUserId } from "../core/session.server";
 import { getUserById, updateUserProfile, updateUserPassword } from "../services/user.server";
+import { createAuditLog } from "../services/audit.server";
 import type { Route } from "./+types/profile";
 import { UserCircleIcon, KeyIcon, CheckCircleIcon, ExclamationCircleIcon } from "@heroicons/react/24/outline";
 
@@ -16,6 +17,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const userId = await requireUserId(request);
+  const user = await getUserById(userId);
   const formData = await request.formData();
   const intent = formData.get("intent");
 
@@ -32,6 +34,14 @@ export async function action({ request }: Route.ActionArgs) {
     if (!result.success) {
       return { error: result.message, success: false, intent };
     }
+    createAuditLog({
+      user_id: Number(userId),
+      user_name: user?.name,
+      action: "更新个人资料",
+      entity: "用户",
+      entity_id: userId,
+      details: "用户更新了个人资料",
+    }, request);
     return { success: true, message: "个人信息更新成功", intent };
   }
 
@@ -56,6 +66,14 @@ export async function action({ request }: Route.ActionArgs) {
     if (!result.success) {
       return { error: result.message, success: false, intent };
     }
+    createAuditLog({
+      user_id: Number(userId),
+      user_name: user?.name,
+      action: "修改个人密码",
+      entity: "用户",
+      entity_id: userId,
+      details: "用户修改了个人密码",
+    }, request);
     return { success: true, message: "密码修改成功", intent };
   }
 

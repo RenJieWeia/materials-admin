@@ -37,6 +37,7 @@ import {
   toggleTodo,
   deleteTodo,
 } from "../services/todo.server";
+import { createAuditLog } from "../services/audit.server";
 import {
   LineChart,
   Line,
@@ -77,10 +78,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response("User not found", { status: 404 });
   }
 
-  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
-  const yesterdayObj = new Date();
-  yesterdayObj.setDate(yesterdayObj.getDate() - 1);
-  const yesterday = yesterdayObj.toLocaleDateString('en-CA');
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+  const yesterdayObj = new Date(new Date().getTime() - 24 * 60 * 60 * 1000);
+  const yesterday = yesterdayObj.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
 
   // Common Data
   const todayConversion = await getConversion(Number(userId), today);
@@ -90,9 +90,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   // Calculate date range for last 30 days for better trend analysis
   const endDate = today;
-  const startDateObj = new Date();
-  startDateObj.setDate(startDateObj.getDate() - 29);
-  const startDate = startDateObj.toLocaleDateString('en-CA');
+  const startDateObj = new Date(new Date().getTime() - 29 * 24 * 60 * 60 * 1000);
+  const startDate = startDateObj.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
 
   const conversions = await getConversions(Number(userId), startDate, endDate);
   const usageStats = await getMaterialUsageStats(user.name, startDate, endDate);
@@ -105,7 +104,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     d <= new Date(today);
     d.setDate(d.getDate() + 1)
   ) {
-    const dateStr = d.toLocaleDateString('en-CA');
+    const dateStr = d.toLocaleDateString("en-CA");
     const convObj = conversions.find((c) => c.date === dateStr);
     const conv = convObj?.count || 0;
     const pass = convObj?.pass_count || 0;
@@ -149,7 +148,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       d <= new Date(today);
       d.setDate(d.getDate() + 1)
     ) {
-      const dateStr = d.toLocaleDateString('en-CA');
+      const dateStr = d.toLocaleDateString("en-CA");
       const convObj = allConversions.find((c) => c.date === dateStr);
       const conv = convObj?.count || 0;
       const pass = convObj?.pass_count || 0;
@@ -195,13 +194,14 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const userId = await requireUserId(request);
+  const user = await getUserById(userId);
   const formData = await request.formData();
   const intent = formData.get("intent");
 
   if (intent === "record_conversion") {
     const count = parseInt(formData.get("count") as string);
     const passCount = parseInt(formData.get("passCount") as string) || 0;
-    const date = new Date().toISOString().split("T")[0]; // Always record for today
+    const date = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" }); // Always record for today in UTC+8
 
     if (isNaN(count) || count < 0) {
       return { error: "请输入有效的数量" };
@@ -212,6 +212,13 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     await recordConversion(Number(userId), date, count, passCount);
+    createAuditLog({
+      user_id: Number(userId),
+      user_name: user?.name,
+      action: "登记转化",
+      entity: "转化记录",
+      details: `登记转化数据: ${count}/${passCount} (日期: ${date})`,
+    }, request);
     return { success: true, message: "登记成功" };
   }
 
@@ -221,36 +228,75 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: "请输入待办事项内容" };
     }
     await createTodo(Number(userId), text);
+    createAuditLog({
+      user_id: Number(userId),
+      user_name: user?.name,
+      action: "创建待办",
+      entity: "待办事项",
+      details: `创建待办事项: ${text}`,
+    }, request);
     return { success: true };
   }
 
   if (intent === "toggle_todo") {
     const id = parseInt(formData.get("todoId") as string);
     await toggleTodo(id, Number(userId));
+    createAuditLog({
+      user_id: Number(userId),
+      user_name: user?.name,
+      action: "切换待办状态",
+      entity: "待办事项",
+      entity_id: id.toString(),
+      details: `切换待办事项状态 ID: ${id}`,
+    }, request);
     return { success: true };
   }
 
   if (intent === "delete_todo") {
     const id = parseInt(formData.get("todoId") as string);
     await deleteTodo(id, Number(userId));
+    createAuditLog({
+      user_id: Number(userId),
+      user_name: user?.name,
+      action: "删除待办",
+      entity: "待办事项",
+      entity_id: id.toString(),
+      details: `删除待办事项 ID: ${id}`,
+    }, request);
     return { success: true };
   }
 
   return null;
 }
 
-function TrendIndicator({ current, previous }: { current: number; previous: number }) {
-  if (previous === 0) return <span className="text-slate-400 text-xs">无昨日数据</span>;
+function TrendIndicator({
+  current,
+  previous,
+}: {
+  current: number;
+  previous: number;
+}) {
+  if (previous === 0)
+    return <span className="text-slate-400 text-xs">无昨日数据</span>;
   const diff = current - previous;
   const percent = ((diff / previous) * 100).toFixed(1);
   const isPositive = diff > 0;
   const isZero = diff === 0;
 
-  if (isZero) return <span className="text-slate-500 text-xs font-medium">与昨日持平</span>;
+  if (isZero)
+    return (
+      <span className="text-slate-500 text-xs font-medium">与昨日持平</span>
+    );
 
   return (
-    <div className={`flex items-center text-xs font-medium ${isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-      {isPositive ? <ArrowTrendingUpIcon className="w-3 h-3 mr-1" /> : <ArrowTrendingDownIcon className="w-3 h-3 mr-1" />}
+    <div
+      className={`flex items-center text-xs font-medium ${isPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
+    >
+      {isPositive ? (
+        <ArrowTrendingUpIcon className="w-3 h-3 mr-1" />
+      ) : (
+        <ArrowTrendingDownIcon className="w-3 h-3 mr-1" />
+      )}
       <span>{Math.abs(Number(percent))}%</span>
       <span className="ml-1 text-slate-400">较昨日</span>
     </div>
@@ -283,7 +329,9 @@ export default function Dashboard({
     }
   }, [addTodoFetcher.state]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [rankingTab, setRankingTab] = useState<'conversion' | 'usage' | 'passRate'>('conversion');
+  const [rankingTab, setRankingTab] = useState<
+    "conversion" | "usage" | "passRate"
+  >("conversion");
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
   const formRef = useRef<HTMLFormElement>(null);
@@ -311,7 +359,12 @@ export default function Dashboard({
             </p>
           </div>
           <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
-            {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+            {new Date().toLocaleDateString("zh-CN", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+              weekday: "long",
+            })}
           </div>
         </div>
 
@@ -320,14 +373,21 @@ export default function Dashboard({
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
             <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日总转化</p>
-                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">{adminData.systemTodayConversion.count}</h3>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  今日总转化
+                </p>
+                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
+                  {adminData.systemTodayConversion.count}
+                </h3>
               </div>
               <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
                 <ChartBarIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
-            <TrendIndicator current={adminData.systemTodayConversion.count} previous={adminData.systemYesterdayConversion.count} />
+            <TrendIndicator
+              current={adminData.systemTodayConversion.count}
+              previous={adminData.systemYesterdayConversion.count}
+            />
             <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/30 p-1.5 rounded-md border border-slate-100 dark:border-slate-700">
               <div className="flex items-center">
                 <span>通过: </span>
@@ -339,7 +399,11 @@ export default function Dashboard({
                 <span>率: </span>
                 <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
                   {adminData.systemTodayUsage > 0
-                    ? ((adminData.systemTodayConversion.pass_count / adminData.systemTodayUsage) * 100).toFixed(1)
+                    ? (
+                        (adminData.systemTodayConversion.pass_count /
+                          adminData.systemTodayUsage) *
+                        100
+                      ).toFixed(1)
                     : 0}
                   %
                 </span>
@@ -350,24 +414,38 @@ export default function Dashboard({
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
             <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日总使用</p>
-                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">{adminData.systemTodayUsage}</h3>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  今日总使用
+                </p>
+                <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
+                  {adminData.systemTodayUsage}
+                </h3>
               </div>
               <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
                 <ComputerDesktopIcon className="w-4 h-4 text-slate-600 dark:text-slate-300" />
               </div>
             </div>
-            <TrendIndicator current={adminData.systemTodayUsage} previous={adminData.systemYesterdayUsage} />
+            <TrendIndicator
+              current={adminData.systemTodayUsage}
+              previous={adminData.systemYesterdayUsage}
+            />
           </div>
 
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
             <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">今日转化率</p>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  今日转化率
+                </p>
                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
-                  {adminData.systemTodayConversion.pass_count > 0 
-                    ? ((adminData.systemTodayConversion.count / adminData.systemTodayConversion.pass_count) * 100).toFixed(1) 
-                    : 0}%
+                  {adminData.systemTodayConversion.pass_count > 0
+                    ? (
+                        (adminData.systemTodayConversion.count /
+                          adminData.systemTodayConversion.pass_count) *
+                        100
+                      ).toFixed(1)
+                    : 0}
+                  %
                 </h3>
               </div>
               <div className="p-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-md border border-slate-100 dark:border-slate-600">
@@ -380,10 +458,12 @@ export default function Dashboard({
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
             <div className="flex justify-between items-start mb-3">
               <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">库存账号数</p>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  库存账号数
+                </p>
                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tracking-tight">
                   {adminData.statusStats
-                    .filter((s: any) => s.status === '空闲')
+                    .filter((s: any) => s.status === "空闲")
                     .reduce((acc: number, curr: any) => acc + curr.count, 0)}
                 </h3>
               </div>
@@ -409,18 +489,42 @@ export default function Dashboard({
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <AreaChart data={adminData.chartData}>
                   <defs>
-                    <linearGradient id="colorConversion" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                    <linearGradient
+                      id="colorConversion"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="colorUsage" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0d9488" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#0d9488" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#0d9488" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="#0d9488" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                  <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickFormatter={(val) => val.slice(5)} tickLine={false} axisLine={false} dy={10} />
-                  <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#e2e8f0"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    stroke="#94a3b8"
+                    fontSize={12}
+                    tickFormatter={(val) => val.slice(5)}
+                    tickLine={false}
+                    axisLine={false}
+                    dy={10}
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    fontSize={12}
+                    tickLine={false}
+                    axisLine={false}
+                    dx={-10}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "#1e293b",
@@ -428,13 +532,29 @@ export default function Dashboard({
                       color: "#f8fafc",
                       borderRadius: "0.375rem",
                       border: "1px solid #334155",
-                      boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
+                      boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
                     }}
                     itemStyle={{ color: "#f8fafc" }}
                   />
-                  <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                  <Area type="monotone" dataKey="conversion" name="总转化数" stroke="#2563eb" strokeWidth={2} fillOpacity={1} fill="url(#colorConversion)" />
-                  <Area type="monotone" dataKey="usage" name="总账号使用" stroke="#0d9488" strokeWidth={2} fillOpacity={1} fill="url(#colorUsage)" />
+                  <Legend wrapperStyle={{ paddingTop: "20px" }} />
+                  <Area
+                    type="monotone"
+                    dataKey="conversion"
+                    name="总转化数"
+                    stroke="#2563eb"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorConversion)"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="usage"
+                    name="总账号使用"
+                    stroke="#0d9488"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorUsage)"
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -447,16 +567,30 @@ export default function Dashboard({
                 待办清单
               </h2>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto mb-4 space-y-2 pr-2 custom-scrollbar">
               {adminData.todos && adminData.todos.length > 0 ? (
                 adminData.todos.map((todo) => (
-                  <div key={todo.id} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-700/50 rounded group">
+                  <div
+                    key={todo.id}
+                    className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-700/50 rounded group"
+                  >
                     <div className="flex items-center gap-3 flex-1">
-                      <Form method="post" className="flex items-center" preventScrollReset>
-                        <input type="hidden" name="intent" value="toggle_todo" />
+                      <Form
+                        method="post"
+                        className="flex items-center"
+                        preventScrollReset
+                      >
+                        <input
+                          type="hidden"
+                          name="intent"
+                          value="toggle_todo"
+                        />
                         <input type="hidden" name="todoId" value={todo.id} />
-                        <button type="submit" className="text-slate-400 hover:text-blue-500 transition-colors cursor-pointer">
+                        <button
+                          type="submit"
+                          className="text-slate-400 hover:text-blue-500 transition-colors cursor-pointer"
+                        >
                           {todo.completed ? (
                             <CheckCircleIcon className="w-5 h-5 text-green-500" />
                           ) : (
@@ -464,14 +598,19 @@ export default function Dashboard({
                           )}
                         </button>
                       </Form>
-                      <span className={`text-sm ${todo.completed ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-slate-200'}`}>
+                      <span
+                        className={`text-sm ${todo.completed ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-200"}`}
+                      >
                         {todo.text}
                       </span>
                     </div>
                     <Form method="post" preventScrollReset>
                       <input type="hidden" name="intent" value="delete_todo" />
                       <input type="hidden" name="todoId" value={todo.id} />
-                      <button type="submit" className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                      <button
+                        type="submit"
+                        className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                      >
                         <TrashIcon className="w-4 h-4" />
                       </button>
                     </Form>
@@ -484,7 +623,11 @@ export default function Dashboard({
               )}
             </div>
 
-            <addTodoFetcher.Form method="post" className="mt-auto" ref={addFormRef}>
+            <addTodoFetcher.Form
+              method="post"
+              className="mt-auto"
+              ref={addFormRef}
+            >
               <input type="hidden" name="intent" value="add_todo" />
               <div className="flex gap-2">
                 <input
@@ -526,13 +669,15 @@ export default function Dashboard({
                     dataKey="count"
                     nameKey="game_name"
                   >
-                    {adminData.systemGameStats.map((entry: any, index: number) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={COLORS[index % COLORS.length]}
-                        strokeWidth={0}
-                      />
-                    ))}
+                    {adminData.systemGameStats.map(
+                      (entry: any, index: number) => (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={COLORS[index % COLORS.length]}
+                          strokeWidth={0}
+                        />
+                      )
+                    )}
                   </Pie>
                   <Tooltip
                     contentStyle={{
@@ -540,15 +685,15 @@ export default function Dashboard({
                       borderColor: "#334155",
                       color: "#f8fafc",
                       borderRadius: "0.375rem",
-                      border: "1px solid #334155"
+                      border: "1px solid #334155",
                     }}
                     itemStyle={{ color: "#f8fafc" }}
                   />
-                  <Legend 
-                    layout="horizontal" 
-                    verticalAlign="bottom" 
+                  <Legend
+                    layout="horizontal"
+                    verticalAlign="bottom"
                     align="center"
-                    wrapperStyle={{ paddingTop: '10px', fontSize: '12px' }}
+                    wrapperStyle={{ paddingTop: "10px", fontSize: "12px" }}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -567,24 +712,50 @@ export default function Dashboard({
                 <AreaChart data={adminData.chartData}>
                   <defs>
                     <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#d97706" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#d97706" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#d97706" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="#d97706" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                  <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickFormatter={(val) => val.slice(5)} tickLine={false} axisLine={false} dy={10} />
-                  <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#e2e8f0"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    stroke="#94a3b8"
+                    fontSize={12}
+                    tickFormatter={(val) => val.slice(5)}
+                    tickLine={false}
+                    axisLine={false}
+                    dy={10}
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    fontSize={12}
+                    tickLine={false}
+                    axisLine={false}
+                    dx={-10}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "#1e293b",
                       borderColor: "#334155",
                       color: "#f8fafc",
                       borderRadius: "0.375rem",
-                      border: "1px solid #334155"
+                      border: "1px solid #334155",
                     }}
                     itemStyle={{ color: "#f8fafc" }}
                   />
-                  <Area type="monotone" dataKey="rate" name="转化率" stroke="#d97706" strokeWidth={2} fillOpacity={1} fill="url(#colorRate)" />
+                  <Area
+                    type="monotone"
+                    dataKey="rate"
+                    name="转化率"
+                    stroke="#d97706"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorRate)"
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -594,37 +765,47 @@ export default function Dashboard({
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700 flex flex-col h-96">
             <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <div className="flex items-center">
-                <div className={`p-1.5 rounded-md border mr-3 transition-colors ${
-                  rankingTab === 'conversion' ? 'bg-amber-50 border-amber-100 text-amber-500 dark:bg-amber-900/20 dark:border-amber-800' : 
-                  rankingTab === 'usage' ? 'bg-rose-50 border-rose-100 text-rose-500 dark:bg-rose-900/20 dark:border-rose-800' :
-                  'bg-emerald-50 border-emerald-100 text-emerald-500 dark:bg-emerald-900/20 dark:border-emerald-800'
-                }`}>
-                  {rankingTab === 'conversion' ? <TrophyIcon className="w-4 h-4" /> : 
-                   rankingTab === 'usage' ? <FireIcon className="w-4 h-4" /> :
-                   <CheckCircleIcon className="w-4 h-4" />}
+                <div
+                  className={`p-1.5 rounded-md border mr-3 transition-colors ${
+                    rankingTab === "conversion"
+                      ? "bg-amber-50 border-amber-100 text-amber-500 dark:bg-amber-900/20 dark:border-amber-800"
+                      : rankingTab === "usage"
+                        ? "bg-rose-50 border-rose-100 text-rose-500 dark:bg-rose-900/20 dark:border-rose-800"
+                        : "bg-emerald-50 border-emerald-100 text-emerald-500 dark:bg-emerald-900/20 dark:border-emerald-800"
+                  }`}
+                >
+                  {rankingTab === "conversion" ? (
+                    <TrophyIcon className="w-4 h-4" />
+                  ) : rankingTab === "usage" ? (
+                    <FireIcon className="w-4 h-4" />
+                  ) : (
+                    <CheckCircleIcon className="w-4 h-4" />
+                  )}
                 </div>
                 <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
-                  {rankingTab === 'conversion' ? '转化排行榜' : 
-                   rankingTab === 'usage' ? '勤奋排行榜' :
-                   '通过率排行'}
+                  {rankingTab === "conversion"
+                    ? "转化排行榜"
+                    : rankingTab === "usage"
+                      ? "勤奋排行榜"
+                      : "通过率排行"}
                 </h2>
               </div>
               <div className="flex bg-slate-100 dark:bg-slate-700/50 rounded-lg p-1">
                 <button
-                  onClick={() => setRankingTab('conversion')}
-                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'conversion' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                  onClick={() => setRankingTab("conversion")}
+                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === "conversion" ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"}`}
                 >
                   转化
                 </button>
                 <button
-                  onClick={() => setRankingTab('usage')}
-                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'usage' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                  onClick={() => setRankingTab("usage")}
+                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === "usage" ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"}`}
                 >
                   勤奋
                 </button>
                 <button
-                  onClick={() => setRankingTab('passRate')}
-                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === 'passRate' ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                  onClick={() => setRankingTab("passRate")}
+                  className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${rankingTab === "passRate" ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"}`}
                 >
                   通过率
                 </button>
@@ -633,45 +814,70 @@ export default function Dashboard({
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
               {(() => {
                 let data = [];
-                if (rankingTab === 'conversion') {
+                if (rankingTab === "conversion") {
                   data = adminData.usersConversionRanking;
-                } else if (rankingTab === 'usage') {
+                } else if (rankingTab === "usage") {
                   data = adminData.usersUsageRanking;
                 } else {
                   data = [...adminData.usersConversionRanking]
                     .map((u: any) => {
-                      const usageUser = adminData.usersUsageRanking.find((usage: any) => usage.user === u.user);
+                      const usageUser = adminData.usersUsageRanking.find(
+                        (usage: any) => usage.user === u.user
+                      );
                       const usageCount = usageUser ? usageUser.count : 0;
                       return {
                         ...u,
-                        rate: usageCount > 0 ? (u.pass_count / usageCount) * 100 : 0
+                        rate:
+                          usageCount > 0
+                            ? (u.pass_count / usageCount) * 100
+                            : 0,
                       };
                     })
                     .sort((a: any, b: any) => b.rate - a.rate);
                 }
 
                 return data.map((item: any, index: number) => (
-                  <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-700/30 mb-2 last:mb-0 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
+                  <div
+                    key={index}
+                    className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-700/30 mb-2 last:mb-0 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
+                  >
                     <div className="flex items-center gap-3">
-                      <div className={`
+                      <div
+                        className={`
                         w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow-sm
-                        ${index === 0 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 ring-1 ring-yellow-200 dark:ring-yellow-500/30' : 
-                          index === 1 ? 'bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-300 ring-1 ring-slate-300 dark:ring-slate-500' : 
-                          index === 2 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400 ring-1 ring-orange-200 dark:ring-orange-500/30' : 
-                          'bg-white text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-600'}
-                      `}>
+                        ${
+                          index === 0
+                            ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 ring-1 ring-yellow-200 dark:ring-yellow-500/30"
+                            : index === 1
+                              ? "bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-300 ring-1 ring-slate-300 dark:ring-slate-500"
+                              : index === 2
+                                ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400 ring-1 ring-orange-200 dark:ring-orange-500/30"
+                                : "bg-white text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-600"
+                        }
+                      `}
+                      >
                         {index + 1}
                       </div>
-                      <span className={`text-sm font-medium ${index < 3 ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
+                      <span
+                        className={`text-sm font-medium ${index < 3 ? "text-slate-900 dark:text-white" : "text-slate-600 dark:text-slate-300"}`}
+                      >
                         {item.user}
                       </span>
                     </div>
-                    <span className={`text-sm font-bold ${index < 3 ? (
-                      rankingTab === 'conversion' ? 'text-blue-600 dark:text-blue-400' : 
-                      rankingTab === 'usage' ? 'text-rose-600 dark:text-rose-400' :
-                      'text-emerald-600 dark:text-emerald-400'
-                    ) : 'text-slate-600 dark:text-slate-400'}`}>
-                      {rankingTab === 'passRate' ? `${item.rate.toFixed(1)}%` : item.count}
+                    <span
+                      className={`text-sm font-bold ${
+                        index < 3
+                          ? rankingTab === "conversion"
+                            ? "text-blue-600 dark:text-blue-400"
+                            : rankingTab === "usage"
+                              ? "text-rose-600 dark:text-rose-400"
+                              : "text-emerald-600 dark:text-emerald-400"
+                          : "text-slate-600 dark:text-slate-400"
+                      }`}
+                    >
+                      {rankingTab === "passRate"
+                        ? `${item.rate.toFixed(1)}%`
+                        : item.count}
                     </span>
                   </div>
                 ));
@@ -695,7 +901,12 @@ export default function Dashboard({
           </p>
         </div>
         <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
-          {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+          {new Date().toLocaleDateString("zh-CN", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            weekday: "long",
+          })}
         </div>
       </div>
 
@@ -717,8 +928,11 @@ export default function Dashboard({
             <div className="text-3xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
               {todayConversion?.count || 0}
             </div>
-            <TrendIndicator current={todayConversion?.count || 0} previous={yesterdayConversion?.count || 0} />
-            
+            <TrendIndicator
+              current={todayConversion?.count || 0}
+              previous={yesterdayConversion?.count || 0}
+            />
+
             <div className="mt-4 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/30 p-2 rounded-md border border-slate-100 dark:border-slate-700">
               <div className="flex items-center">
                 <CheckCircleIcon className="w-3 h-3 mr-2 text-emerald-500" />
@@ -731,7 +945,10 @@ export default function Dashboard({
                 <span>率: </span>
                 <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
                   {todayUsageCount > 0
-                    ? (((todayConversion?.pass_count || 0) / todayUsageCount) * 100).toFixed(1)
+                    ? (
+                        ((todayConversion?.pass_count || 0) / todayUsageCount) *
+                        100
+                      ).toFixed(1)
                     : 0}
                   %
                 </span>
@@ -765,14 +982,21 @@ export default function Dashboard({
             <div className="text-3xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
               {todayUsageCount}
             </div>
-            <TrendIndicator current={todayUsageCount} previous={yesterdayUsageCount} />
+            <TrendIndicator
+              current={todayUsageCount}
+              previous={yesterdayUsageCount}
+            />
 
             <div className="mt-4 flex items-center text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/30 p-2 rounded-md border border-slate-100 dark:border-slate-700">
               <ArrowTrendingUpIcon className="w-3 h-3 mr-2 text-slate-400" />
               <span>今日转化率: </span>
               <span className="ml-1 font-semibold text-slate-700 dark:text-slate-300">
                 {(todayConversion?.pass_count || 0) > 0
-                  ? (((todayConversion?.count || 0) / (todayConversion?.pass_count || 0)) * 100).toFixed(1)
+                  ? (
+                      ((todayConversion?.count || 0) /
+                        (todayConversion?.pass_count || 0)) *
+                      100
+                    ).toFixed(1)
                   : 0}
                 %
               </span>
@@ -793,32 +1017,44 @@ export default function Dashboard({
           <div className="space-y-3">
             {recentConversions.length > 0 ? (
               recentConversions.slice(0, 3).map((conv: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between text-xs border-b border-slate-100 dark:border-slate-700/50 pb-2 last:border-0 last:pb-0">
+                <div
+                  key={idx}
+                  className="flex items-center justify-between text-xs border-b border-slate-100 dark:border-slate-700/50 pb-2 last:border-0 last:pb-0"
+                >
                   <div className="flex items-center text-slate-600 dark:text-slate-300">
                     <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-2"></div>
                     <span>转化登记</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="flex flex-col items-end">
-                      <span className="font-medium text-slate-900 dark:text-white">+{conv.count}</span>
+                      <span className="font-medium text-slate-900 dark:text-white">
+                        +{conv.count}
+                      </span>
                       <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
                         (通{conv.pass_count || 0})
                       </span>
                     </div>
-                    <span className="text-xs text-slate-400">{new Date(conv.date).toLocaleDateString()}</span>
+                    <span className="text-xs text-slate-400">
+                      {new Date(conv.date).toLocaleDateString()}
+                    </span>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="text-xs text-slate-400 text-center py-4">暂无近期记录</div>
+              <div className="text-xs text-slate-400 text-center py-4">
+                暂无近期记录
+              </div>
             )}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
-               <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500">近30日总转化</span>
-                  <span className="font-bold text-slate-900 dark:text-white">
-                    {chartData.reduce((acc: number, curr: any) => acc + curr.conversion, 0)}
-                  </span>
-               </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">近30日总转化</span>
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {chartData.reduce(
+                    (acc: number, curr: any) => acc + curr.conversion,
+                    0
+                  )}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -837,31 +1073,77 @@ export default function Dashboard({
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <AreaChart data={chartData}>
                 <defs>
-                  <linearGradient id="colorUserConversion" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                  <linearGradient
+                    id="colorUserConversion"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1} />
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
                   </linearGradient>
-                  <linearGradient id="colorUserUsage" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0d9488" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#0d9488" stopOpacity={0}/>
+                  <linearGradient
+                    id="colorUserUsage"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#0d9488" stopOpacity={0.1} />
+                    <stop offset="95%" stopColor="#0d9488" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickFormatter={(val) => val.slice(5)} tickLine={false} axisLine={false} dy={10} />
-                <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#e2e8f0"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="date"
+                  stroke="#94a3b8"
+                  fontSize={12}
+                  tickFormatter={(val) => val.slice(5)}
+                  tickLine={false}
+                  axisLine={false}
+                  dy={10}
+                />
+                <YAxis
+                  stroke="#94a3b8"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  dx={-10}
+                />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "#1e293b",
                     borderColor: "#334155",
                     color: "#f8fafc",
                     borderRadius: "0.375rem",
-                    border: "1px solid #334155"
+                    border: "1px solid #334155",
                   }}
                   itemStyle={{ color: "#f8fafc" }}
                 />
-                <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                <Area type="monotone" dataKey="conversion" name="转化数" stroke="#2563eb" strokeWidth={2} fillOpacity={1} fill="url(#colorUserConversion)" />
-                <Area type="monotone" dataKey="usage" name="账号使用数" stroke="#0d9488" strokeWidth={2} fillOpacity={1} fill="url(#colorUserUsage)" />
+                <Legend wrapperStyle={{ paddingTop: "20px" }} />
+                <Area
+                  type="monotone"
+                  dataKey="conversion"
+                  name="转化数"
+                  stroke="#2563eb"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#colorUserConversion)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="usage"
+                  name="账号使用数"
+                  stroke="#0d9488"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#colorUserUsage)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -869,51 +1151,51 @@ export default function Dashboard({
 
         {/* Game Distribution */}
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-4 border border-slate-200 dark:border-slate-700">
-            <div className="flex items-center mb-4">
-              <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
-                常用游戏分布
-              </h2>
-            </div>
-            <div className="h-64 w-full min-w-0">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <PieChart>
-                  <Pie
-                    data={userGameStats}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="count"
-                    nameKey="game_name"
-                  >
-                    {userGameStats.map((entry: any, index: number) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={COLORS[index % COLORS.length]}
-                        strokeWidth={0}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#1e293b",
-                      borderColor: "#334155",
-                      color: "#f8fafc",
-                      borderRadius: "0.375rem",
-                      border: "1px solid #334155"
-                    }}
-                    itemStyle={{ color: "#f8fafc" }}
-                  />
-                  <Legend 
-                    layout="vertical" 
-                    verticalAlign="middle" 
-                    align="center"
-                    wrapperStyle={{ paddingTop: '20px' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="flex items-center mb-4">
+            <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">
+              常用游戏分布
+            </h2>
+          </div>
+          <div className="h-64 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <PieChart>
+                <Pie
+                  data={userGameStats}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="count"
+                  nameKey="game_name"
+                >
+                  {userGameStats.map((entry: any, index: number) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={COLORS[index % COLORS.length]}
+                      strokeWidth={0}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#1e293b",
+                    borderColor: "#334155",
+                    color: "#f8fafc",
+                    borderRadius: "0.375rem",
+                    border: "1px solid #334155",
+                  }}
+                  itemStyle={{ color: "#f8fafc" }}
+                />
+                <Legend
+                  layout="vertical"
+                  verticalAlign="middle"
+                  align="center"
+                  wrapperStyle={{ paddingTop: "20px" }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
         {/* Conversion Rate Trend */}
@@ -926,21 +1208,47 @@ export default function Dashboard({
           <div className="h-64 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickFormatter={(val) => val.slice(5)} tickLine={false} axisLine={false} dy={10} />
-                <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#e2e8f0"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="date"
+                  stroke="#94a3b8"
+                  fontSize={12}
+                  tickFormatter={(val) => val.slice(5)}
+                  tickLine={false}
+                  axisLine={false}
+                  dy={10}
+                />
+                <YAxis
+                  stroke="#94a3b8"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  dx={-10}
+                />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "#1e293b",
                     borderColor: "#334155",
                     color: "#f8fafc",
                     borderRadius: "0.375rem",
-                    border: "1px solid #334155"
+                    border: "1px solid #334155",
                   }}
                   itemStyle={{ color: "#f8fafc" }}
                 />
-                <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                <Line type="monotone" dataKey="rate" name="转化率" stroke="#4f46e5" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6, strokeWidth: 0 }} />
+                <Legend wrapperStyle={{ paddingTop: "20px" }} />
+                <Line
+                  type="monotone"
+                  dataKey="rate"
+                  name="转化率"
+                  stroke="#4f46e5"
+                  strokeWidth={3}
+                  dot={{ r: 4, strokeWidth: 2 }}
+                  activeDot={{ r: 6, strokeWidth: 0 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>

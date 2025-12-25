@@ -4,6 +4,7 @@ import { UserPlusIcon, MagnifyingGlassIcon, ArrowPathIcon, PencilSquareIcon, Key
 import type { Route } from "./+types/users";
 import { getUsers, createUser, updateUserPassword, getUserById, deleteUser, updateUserProfile } from "../services/user.server";
 import { requireUserId } from "../core/session.server";
+import { createAuditLog } from "../services/audit.server";
 import Pagination from "../components/Pagination";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -49,6 +50,14 @@ export async function action({ request }: Route.ActionArgs) {
     if (!result.success) {
       return { error: result.message };
     }
+    createAuditLog({
+      user_id: user.id,
+      user_name: user.name,
+      action: "删除用户",
+      entity: "用户",
+      entity_id: deleteUserId,
+      details: `删除用户 ID: ${deleteUserId}`,
+    }, request);
     return { success: true };
   }
 
@@ -67,6 +76,13 @@ export async function action({ request }: Route.ActionArgs) {
     if (!result.success) {
       return { error: result.message };
     }
+    createAuditLog({
+      user_id: user.id,
+      user_name: user.name,
+      action: "创建用户",
+      entity: "用户",
+      details: `创建用户: ${name} (${email})`,
+    }, request);
     return { success: true };
   }
 
@@ -84,6 +100,14 @@ export async function action({ request }: Route.ActionArgs) {
     if (!result.success) {
       return { error: result.message };
     }
+    createAuditLog({
+      user_id: user.id,
+      user_name: user.name,
+      action: "更新用户资料",
+      entity: "用户",
+      entity_id: userId,
+      details: `更新用户资料 ID: ${userId}`,
+    }, request);
     return { success: true };
   }
 
@@ -99,6 +123,14 @@ export async function action({ request }: Route.ActionArgs) {
     if (!result.success) {
       return { error: result.message };
     }
+    createAuditLog({
+      user_id: user.id,
+      user_name: user.name,
+      action: "修改用户密码",
+      entity: "用户",
+      entity_id: userId,
+      details: `修改用户密码 ID: ${userId}`,
+    }, request);
     return { success: true };
   }
 

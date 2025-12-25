@@ -12,6 +12,7 @@ import {
   getUniqueGameNames,
   getMaterialByAccountName,
 } from "../services/material.server";
+import { createAuditLog } from "../services/audit.server";
 import Pagination from "../components/Pagination";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -82,6 +83,14 @@ export async function action({ request }: Route.ActionArgs) {
 
     try {
       const material = await claimMaterial(Number(id), user.name);
+      createAuditLog({
+        user_id: user.id,
+        user_name: user.name,
+        action: "领取材料",
+        entity: "材料",
+        entity_id: id.toString(),
+        details: `领取材料: ${material.account_name}`,
+      }, request);
       return { success: true, claimedAccount: material.account_name };
     } catch (e: any) {
       return { error: e.message };
@@ -196,6 +205,34 @@ export async function action({ request }: Route.ActionArgs) {
         message += ` (异常账号: ${displayedAccounts}${invalidUserAccounts.length > 3 ? ' 等' : ''})`;
       }
     }
+
+    // 统计各游戏导入数量
+    const gameStats: Record<string, number> = {};
+    let idleCount = 0;
+    
+    for (const row of data) {
+      if (row["游戏名称"] && row["账户名称"]) {
+        const gameName = row["游戏名称"];
+        gameStats[gameName] = (gameStats[gameName] || 0) + 1;
+        
+        const status = row["使用状态"] || row["状态"] || "空闲";
+        if (status === "空闲") {
+          idleCount++;
+        }
+      }
+    }
+
+    const gameDetails = Object.entries(gameStats)
+      .map(([game, count]) => `${game}: ${count}条`)
+      .join(", ");
+
+    createAuditLog({
+      user_id: currentUser.id,
+      user_name: currentUser.name,
+      action: "导入材料",
+      entity: "材料",
+      details: `成功导入 ${count} 条数据 (空闲: ${idleCount}条)。明细: ${gameDetails}`,
+    }, request);
 
     return { success: true, message };
   }

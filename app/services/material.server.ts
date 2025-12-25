@@ -1,5 +1,7 @@
 import { db } from "../core/db.server";
 import type { Material } from "../types";
+import { incrementConversionCount } from "./conversion.server";
+
 
 export async function getUniqueGameNames(status?: string) {
   let query = `SELECT DISTINCT game_name FROM materials WHERE game_name IS NOT NULL AND game_name != ''`;
@@ -148,6 +150,13 @@ export async function claimMaterial(id: number, username: string) {
   db.prepare(
     "UPDATE materials SET status = '已使用', user = ?, usage_time = ? WHERE id = ?"
   ).run(username, now, id);
+
+  // Update conversion record
+  const user = db.prepare("SELECT id FROM users WHERE name = ?").get(username) as { id: number } | undefined;
+  if (user) {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+    incrementConversionCount(user.id, today);
+  }
 
   return { ...material, status: "已使用", user: username, usage_time: now };
 }
