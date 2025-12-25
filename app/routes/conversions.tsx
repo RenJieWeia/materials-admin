@@ -337,8 +337,9 @@ export default function Conversions() {
                       用户
                     </th>
                   )}
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    转化数量
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">                    使用数量
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">                    转化数量
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     通过数量
@@ -366,6 +367,21 @@ export default function Conversions() {
                           {(conversion as any).real_name || (conversion as any).user_name || "-"}
                         </td>
                       )}
+                      <td className="whitespace-nowrap px-6 py-4 text-sm">
+                        <span className="inline-flex items-center rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                          {(() => {
+                            let usageCount = 0;
+                            if (isAdmin) {
+                              const stat = (usageStats as any[]).find((u: any) => u.date === conversion.date && u.user === ((conversion as any).user_name));
+                              usageCount = stat ? stat.count : 0;
+                            } else {
+                              const stat = (usageStats as any[]).find((u: any) => u.date === conversion.date);
+                              usageCount = stat ? stat.count : 0;
+                            }
+                            return usageCount;
+                          })()}
+                        </span>
+                      </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm">
                         <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                           {conversion.count}
