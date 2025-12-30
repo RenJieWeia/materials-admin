@@ -6,3 +6,5 @@
 /.react-router/
 /build/
 app/data/*
+app/data/app.db-shm
+app/data/app.db-wal
