@@ -109,8 +109,8 @@ export default function Conversions() {
         const pass = c.pass_count || 0;
         return {
           ...c,
-          conversion_rate: usage > 0 ? Number(((count / usage) * 100).toFixed(2)) : 0,
-          pass_rate: count > 0 ? Number(((pass / count) * 100).toFixed(2)) : 0,
+          conversion_rate: pass > 0 ? Number(((count / pass) * 100).toFixed(2)) : 0,
+          pass_rate: usage > 0 ? Number(((pass / usage) * 100).toFixed(2)) : 0,
         };
       }).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
       return { chartData: data, userNames: [] };
