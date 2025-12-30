@@ -13,6 +13,7 @@ import {
   Bar,
   LineChart,
   Line,
+  ComposedChart,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -34,28 +35,39 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const url = new URL(request.url);
-  const startDate = url.searchParams.get("startDate") || undefined;
-  const endDate = url.searchParams.get("endDate") || undefined;
+  let startDate = url.searchParams.get("startDate");
+  let endDate = url.searchParams.get("endDate");
   const filterUserId = url.searchParams.get("userId") ? Number(url.searchParams.get("userId")) : undefined;
+
+  // Default to today if no date range is provided
+  if (!startDate && !endDate) {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+    startDate = todayStr;
+    endDate = todayStr;
+  }
 
   let conversions;
   let allUsers: any[] = [];
   let usageStats: any[] = [];
 
   if (user.role === "admin") {
-    conversions = await getAllUserConversions(startDate, endDate, filterUserId);
+    conversions = await getAllUserConversions(startDate || undefined, endDate || undefined, filterUserId);
     allUsers = await getAllUsers();
-    usageStats = await getAllUserDailyUsageStats(startDate, endDate);
+    usageStats = await getAllUserDailyUsageStats(startDate || undefined, endDate || undefined);
   } else {
-    conversions = await getConversions(Number(userId), startDate, endDate);
-    usageStats = await getMaterialUsageStats(user.name, startDate, endDate);
+    conversions = await getConversions(Number(userId), startDate || undefined, endDate || undefined);
+    usageStats = await getMaterialUsageStats(user.name, startDate || undefined, endDate || undefined);
   }
   
-  return { conversions, user, allUsers, usageStats };
+  return { conversions, user, allUsers, usageStats, startDate, endDate };
 }
 
 export default function Conversions() {
-  const { conversions, user, allUsers, usageStats } = useLoaderData<typeof loader>();
+  const { conversions, user, allUsers, usageStats, startDate, endDate } = useLoaderData<typeof loader>();
   const isAdmin = user.role === "admin";
   const [searchParams] = useSearchParams();
   const submit = useSubmit();
@@ -91,7 +103,16 @@ export default function Conversions() {
       const data = Object.values(grouped).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
       return { chartData: data, userNames: names as string[] };
     } else {
-      const data = [...conversions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const data = conversions.map((c: any) => {
+        const usage = c.usage_count || 0;
+        const count = c.count || 0;
+        const pass = c.pass_count || 0;
+        return {
+          ...c,
+          conversion_rate: usage > 0 ? Number(((count / usage) * 100).toFixed(2)) : 0,
+          pass_rate: count > 0 ? Number(((pass / count) * 100).toFixed(2)) : 0,
+        };
+      }).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
       return { chartData: data, userNames: [] };
     }
   }, [conversions, isAllUsers, metricType]);
@@ -150,14 +171,14 @@ export default function Conversions() {
             <input
               type="date"
               name="startDate"
-              defaultValue={searchParams.get("startDate") || ""}
+              defaultValue={startDate || ""}
               className="px-2 py-1 text-sm border border-slate-200 dark:border-slate-600 rounded bg-transparent text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
             <span className="text-slate-400">-</span>
             <input
               type="date"
               name="endDate"
-              defaultValue={searchParams.get("endDate") || ""}
+              defaultValue={endDate || ""}
               className="px-2 py-1 text-sm border border-slate-200 dark:border-slate-600 rounded bg-transparent text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
 
@@ -249,7 +270,38 @@ export default function Conversions() {
           
           <div className="h-[500px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              {chartType === 'bar' ? (
+              {!isAllUsers ? (
+                <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <XAxis 
+                    dataKey="date" 
+                    stroke="#94a3b8" 
+                    fontSize={12} 
+                    tickFormatter={(val) => val.slice(5)} 
+                    tickLine={false} 
+                    axisLine={false} 
+                    dy={10} 
+                  />
+                  <YAxis yAxisId="left" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={-10} />
+                  <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dx={10} unit="%" />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#1e293b",
+                      borderColor: "#334155",
+                      color: "#f8fafc",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #334155"
+                    }}
+                    itemStyle={{ color: "#f8fafc" }}
+                    cursor={{ fill: 'rgba(148, 163, 184, 0.1)' }}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                  <Bar yAxisId="left" dataKey="count" name="转化数量" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
+                  <Bar yAxisId="left" dataKey="pass_count" name="通过数量" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
+                  <Line yAxisId="right" type="monotone" dataKey="conversion_rate" name="转化率" stroke="#f59e0b" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <Line yAxisId="right" type="monotone" dataKey="pass_rate" name="通过率" stroke="#ec4899" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                </ComposedChart>
+              ) : chartType === 'bar' ? (
                 <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis 
@@ -274,23 +326,16 @@ export default function Conversions() {
                     cursor={{ fill: 'rgba(148, 163, 184, 0.1)' }}
                   />
                   <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                  {isAllUsers ? (
-                    userNames.map((name, index) => (
-                      <Bar 
-                        key={name} 
-                        dataKey={name} 
-                        name={name} 
-                        fill={colors[index % colors.length]} 
-                        radius={[4, 4, 0, 0]} 
-                      />
-                    ))
-                  ) : (
-                    <>
-                      <Bar dataKey="usage_count" name="使用数量" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="count" name="转化数量" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="pass_count" name="通过数量" fill="#10b981" radius={[4, 4, 0, 0]} />
-                    </>
-                  )}
+                  {userNames.map((name, index) => (
+                    <Bar 
+                      key={name} 
+                      dataKey={name} 
+                      name={name} 
+                      stackId="a"
+                      fill={colors[index % colors.length]} 
+                      radius={[0, 0, 0, 0]} 
+                    />
+                  ))}
                 </BarChart>
               ) : (
                 <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
@@ -316,26 +361,18 @@ export default function Conversions() {
                     itemStyle={{ color: "#f8fafc" }}
                   />
                   <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                  {isAllUsers ? (
-                    userNames.map((name, index) => (
-                      <Line 
-                        key={name} 
-                        type="monotone" 
-                        dataKey={name} 
-                        name={name} 
-                        stroke={colors[index % colors.length]} 
-                        strokeWidth={3} 
-                        dot={{ r: 4 }} 
-                        activeDot={{ r: 6 }} 
-                      />
-                    ))
-                  ) : (
-                    <>
-                      <Line type="monotone" dataKey="usage_count" name="使用数量" stroke="#8b5cf6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                      <Line type="monotone" dataKey="count" name="转化数量" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                      <Line type="monotone" dataKey="pass_count" name="通过数量" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                    </>
-                  )}
+                  {userNames.map((name, index) => (
+                    <Line 
+                      key={name} 
+                      type="monotone" 
+                      dataKey={name} 
+                      name={name} 
+                      stroke={colors[index % colors.length]} 
+                      strokeWidth={3} 
+                      dot={{ r: 4 }} 
+                      activeDot={{ r: 6 }} 
+                    />
+                  ))}
                 </LineChart>
               )}
             </ResponsiveContainer>
