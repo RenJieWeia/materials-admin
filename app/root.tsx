@@ -10,6 +10,7 @@ import {
 import type { Route } from "./+types/root";
 import "./app.css";
 import { ThemeProvider } from "./components/ThemeProvider";
+import { UploadProgressProvider } from "./components/UploadProgressContext";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -47,7 +48,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ThemeProvider>
-      <Outlet />
+      <UploadProgressProvider>
+        <Outlet />
+      </UploadProgressProvider>
     </ThemeProvider>
   );
 }

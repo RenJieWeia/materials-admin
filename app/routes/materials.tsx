@@ -7,13 +7,12 @@ import { requireUserId } from "../core/session.server";
 import { getUserById, getAllUsers } from "../services/user.server";
 import {
   getMaterials,
-  createMaterial,
   claimMaterial,
   getUniqueGameNames,
-  getMaterialByAccountName,
 } from "../services/material.server";
 import { createAuditLog } from "../services/audit.server";
 import Pagination from "../components/Pagination";
+import { useUploadProgress } from "../components/UploadProgressContext";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireUserId(request);
@@ -97,146 +96,6 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
-  if (intent === "import") {
-    const file = formData.get("file") as File;
-    if (!file || file.size === 0) {
-      return { error: "请选择文件" };
-    }
-
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet) as any[];
-
-    const userId = await requireUserId(request);
-    const currentUser = await getUserById(userId);
-    if (!currentUser) return { error: "User not found" };
-
-    const allUsers = await getAllUsers();
-    const validUsernames = new Set(allUsers.map((u) => u.name));
-
-    let count = 0;
-    let skipped = 0;
-    const skippedAccounts: string[] = [];
-    let invalidStatusCount = 0;
-    const invalidStatusAccounts: string[] = [];
-    let invalidUserCount = 0;
-    const invalidUserAccounts: string[] = [];
-
-    for (const row of data) {
-      // 假设 Excel 列名为：游戏名称, 账户名称
-      if (row["游戏名称"] && row["账户名称"]) {
-        const existing = await getMaterialByAccountName(row["账户名称"]);
-        if (existing) {
-          skipped++;
-          skippedAccounts.push(row["账户名称"]);
-          continue;
-        }
-
-        let status = row["使用状态"] || row["状态"] || "空闲";
-        if (status !== "空闲" && status !== "已使用") {
-          invalidStatusCount++;
-          invalidStatusAccounts.push(row["账户名称"]);
-          continue;
-        }
-
-        let user = row["使用人"];
-        let usage_time = row["使用时间"];
-
-        if (status === "空闲") {
-          user = null;
-          usage_time = null;
-        } else if (status === "已使用") {
-          if (!validUsernames.has(user)) {
-            invalidUserCount++;
-            invalidUserAccounts.push(row["账户名称"]);
-            continue;
-          }
-
-          if (!usage_time) {
-            const date = new Date();
-            usage_time =
-              date.getFullYear() +
-              "-" +
-              String(date.getMonth() + 1).padStart(2, "0") +
-              "-" +
-              String(date.getDate()).padStart(2, "0") +
-              " " +
-              String(date.getHours()).padStart(2, "0") +
-              ":" +
-              String(date.getMinutes()).padStart(2, "0") +
-              ":" +
-              String(date.getSeconds()).padStart(2, "0");
-          }
-        }
-
-        await createMaterial({
-          game_name: row["游戏名称"],
-          account_name: row["账户名称"],
-          description: row["描述"],
-          status: status,
-          user: user,
-          usage_time: usage_time,
-        });
-        count++;
-      }
-    }
-
-    let message = `成功导入 ${count} 条数据`;
-    if (skipped > 0) {
-      message += `，跳过 ${skipped} 条重复数据`;
-      if (skippedAccounts.length > 0) {
-         const displayedAccounts = skippedAccounts.slice(0, 3).join(", ");
-         message += ` (重复账号: ${displayedAccounts}${skippedAccounts.length > 3 ? ' 等' : ''})`;
-      }
-    }
-    if (invalidStatusCount > 0) {
-      message += `，跳过 ${invalidStatusCount} 条状态异常数据`;
-      if (invalidStatusAccounts.length > 0) {
-        const displayedAccounts = invalidStatusAccounts.slice(0, 3).join(", ");
-        message += ` (异常账号: ${displayedAccounts}${invalidStatusAccounts.length > 3 ? ' 等' : ''})`;
-      }
-    }
-    if (invalidUserCount > 0) {
-      message += `，跳过 ${invalidUserCount} 条使用人异常数据`;
-      if (invalidUserAccounts.length > 0) {
-        const displayedAccounts = invalidUserAccounts.slice(0, 3).join(", ");
-        message += ` (异常账号: ${displayedAccounts}${invalidUserAccounts.length > 3 ? ' 等' : ''})`;
-      }
-    }
-
-    // 统计各游戏导入数量
-    const gameStats: Record<string, number> = {};
-    let idleCount = 0;
-    
-    for (const row of data) {
-      if (row["游戏名称"] && row["账户名称"]) {
-        const gameName = row["游戏名称"];
-        gameStats[gameName] = (gameStats[gameName] || 0) + 1;
-        
-        const status = row["使用状态"] || row["状态"] || "空闲";
-        if (status === "空闲") {
-          idleCount++;
-        }
-      }
-    }
-
-    const gameDetails = Object.entries(gameStats)
-      .map(([game, count]) => `${game}: ${count}条`)
-      .join(", ");
-
-    createAuditLog({
-      user_id: currentUser.id,
-      user_name: currentUser.name,
-      action: "导入材料",
-      entity: "材料",
-      details: `成功导入 ${count} 条数据 (空闲: ${idleCount}条)。明细: ${gameDetails}`,
-    }, request);
-
-    return { success: true, message };
-  }
-
   return null;
 }
 
@@ -254,6 +113,8 @@ export default function Materials({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const { state: uploadState, startUpload } = useUploadProgress();
+  const isUploading = uploadState.status === "uploading";
 
   const showToast = (type: "success" | "error", message: string) => {
     setToast({ type, message });
@@ -328,10 +189,24 @@ export default function Materials({
         if (fileInputRef.current) fileInputRef.current.value = "";
         return;
       }
-      const formData = new FormData();
-      formData.append("intent", "import");
-      formData.append("file", file);
-      submit(formData, { method: "post", encType: "multipart/form-data" });
+      // Parse Excel client-side and start chunked background upload
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const buffer = e.target?.result;
+        if (!buffer) return;
+        const workbook = XLSX.read(buffer);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(sheet) as Record<string, string>[];
+        if (data.length === 0) {
+          showToast("error", "文件中没有数据");
+          return;
+        }
+        showToast("success", `已解析 ${data.length} 条数据，开始后台导入...`);
+        startUpload(data);
+      };
+      reader.readAsArrayBuffer(file);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -368,11 +243,11 @@ export default function Materials({
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isSubmitting}
+            disabled={isSubmitting || isUploading}
             className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 transition-colors"
           >
             <DocumentArrowUpIcon className="w-4 h-4 mr-2" />
-            {isSubmitting ? "处理中..." : "Excel 导入"}
+            {isUploading ? "导入中..." : "Excel 导入"}
           </button>
         </div>
       </div>
@@ -552,12 +427,6 @@ export default function Materials({
           </div>
         </Form>
       </div>
-
-      {actionData?.message && (
-        <div className="rounded-md bg-emerald-50 dark:bg-emerald-900/20 p-4 text-sm text-emerald-700 dark:text-emerald-200 border border-emerald-100 dark:border-emerald-800">
-          {actionData.message}
-        </div>
-      )}
 
       {actionData?.error && (
         <div className="rounded-md bg-rose-50 dark:bg-rose-900/20 p-4 text-sm text-rose-700 dark:text-rose-200 border border-rose-100 dark:border-rose-800">

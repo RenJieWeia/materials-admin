@@ -194,6 +194,44 @@ export async function createMaterial(data: {
   return { success: true, id: result.lastInsertRowid };
 }
 
+export function batchCreateMaterials(rows: Array<{
+  game_name: string;
+  account_name: string;
+  description?: string;
+  status?: string;
+  user?: string;
+  usage_time?: string;
+}>) {
+  const insert = db.prepare(`
+    INSERT INTO materials (game_name, account_name, description, status, user, usage_time)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const transaction = db.transaction((items: typeof rows) => {
+    for (const data of items) {
+      insert.run(
+        data.game_name,
+        data.account_name,
+        data.description || null,
+        data.status || "空闲",
+        data.user || null,
+        data.usage_time || null
+      );
+    }
+  });
+
+  transaction(rows);
+}
+
+export function batchCheckAccountNames(accountNames: string[]): Set<string> {
+  if (accountNames.length === 0) return new Set();
+  const placeholders = accountNames.map(() => "?").join(",");
+  const existing = db
+    .prepare(`SELECT account_name FROM materials WHERE account_name IN (${placeholders})`)
+    .all(...accountNames) as { account_name: string }[];
+  return new Set(existing.map((r) => r.account_name));
+}
+
 export async function updateMaterial(
   id: number,
   data: {

@@ -4,6 +4,7 @@ import { requireUserId } from "../core/session.server";
 import { getUserById } from "../services/user.server";
 import { useTheme } from "../components/ThemeProvider";
 import { MoonIcon, SunIcon } from "@heroicons/react/24/outline";
+import UploadProgressIndicator from "../components/UploadProgressIndicator";
 
 export async function loader({ request }: Route.LoaderArgs) {
   let userId = await requireUserId(request);
@@ -157,6 +158,7 @@ export default function Layout({ loaderData }: Route.ComponentProps) {
           <Outlet />
         </div>
       </main>
+      <UploadProgressIndicator />
     </div>
   );
 }
