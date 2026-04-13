@@ -1,7 +1,7 @@
 import { Form, useNavigation, useSubmit, useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
-import { ArrowDownTrayIcon, DocumentArrowUpIcon, MagnifyingGlassIcon, ArrowPathIcon, ArchiveBoxIcon, ClockIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, DocumentArrowUpIcon, MagnifyingGlassIcon, ArrowPathIcon, ArchiveBoxIcon } from "@heroicons/react/24/outline";
 import type { Route } from "./+types/materials";
 import { requireUserId } from "../core/session.server";
 import { getUserById, getAllUsers } from "../services/user.server";
@@ -9,9 +9,6 @@ import {
   getMaterials,
   claimMaterial,
   getUniqueGameNames,
-  getIdleCleanupSettings,
-  updateIdleCleanupSettings,
-  cleanupIdleMaterials,
 } from "../services/material.server";
 import { createAuditLog } from "../services/audit.server";
 import Pagination from "../components/Pagination";
@@ -42,9 +39,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     getAllUsers(),
   ]);
 
-  const cleanupSettings =
-    user.role === "admin" ? await getIdleCleanupSettings() : null;
-
   const data = await getMaterials({
     game_name,
     account_name,
@@ -73,7 +67,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       sort,
     },
     user: { id: user.id, name: user.name, role: user.role },
-    cleanupSettings,
   };
 }
 
@@ -112,63 +105,6 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
-  if (intent === "cleanupIdleNow" || intent === "updateCleanupSettings") {
-    const userId = await requireUserId(request);
-    const user = await getUserById(userId);
-
-    if (!user || user.role !== "admin") {
-      return { error: "无权限执行此操作" };
-    }
-
-    if (intent === "cleanupIdleNow") {
-      const result = await cleanupIdleMaterials();
-
-      createAuditLog(
-        {
-          user_id: Number(user.id),
-          user_name: user.name,
-          action: "手动清理空闲账号",
-          entity: "材料",
-          details: `手动清理完成，删除 ${result.deletedCount} 条空闲账号`,
-        },
-        request
-      );
-
-      return {
-        success: true,
-        message: `清理完成，已删除 ${result.deletedCount} 条空闲账号`,
-      };
-    }
-
-    const enabled = formData.get("enabled") === "on";
-    const scheduleTime = (formData.get("scheduleTime") as string) || "";
-    const timeMatch = /^([01]\d|2[0-3]):([0-5]\d)$/.test(scheduleTime);
-
-    if (!timeMatch) {
-      return { error: "定时时间格式不正确" };
-    }
-
-    await updateIdleCleanupSettings({ enabled, scheduleTime });
-
-    createAuditLog(
-      {
-        user_id: Number(user.id),
-        user_name: user.name,
-        action: "更新空闲账号清理计划",
-        entity: "材料",
-        details: `${enabled ? "启用" : "停用"}定时清理，执行时间：${scheduleTime}`,
-      },
-      request
-    );
-
-    return {
-      success: true,
-      message: enabled
-        ? `已启用每日 ${scheduleTime} 定时清理`
-        : "已停用定时清理",
-    };
-  }
-
   return null;
 }
 
@@ -176,7 +112,7 @@ export default function Materials({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { materials, total, page, limit, totalPages, filters, user, cleanupSettings } =
+  const { materials, total, page, limit, totalPages, filters, user } =
     loaderData;
   const navigation = useNavigation();
   const submit = useSubmit();
@@ -324,77 +260,6 @@ export default function Materials({
           </button>
         </div>
       </div>
-
-      {user.role === "admin" && cleanupSettings && (
-        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/10 p-5 shadow-sm">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-slate-900 dark:text-white">空闲账号清理</h2>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                支持手动一键清理，或启用每日定时清理空闲状态账号。
-              </p>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                上次定时执行：{cleanupSettings.lastRunAt || "暂无记录"}
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <Form method="post" className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <input type="hidden" name="intent" value="updateCleanupSettings" />
-
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
-                  <input
-                    type="checkbox"
-                    name="enabled"
-                    defaultChecked={cleanupSettings.enabled}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  启用每日定时清理
-                </label>
-
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
-                  <ClockIcon className="w-4 h-4 text-slate-500" />
-                  执行时间
-                  <input
-                    type="time"
-                    name="scheduleTime"
-                    defaultValue={cleanupSettings.scheduleTime}
-                    required
-                    className="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700/50 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white"
-                  />
-                </label>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
-                >
-                  保存计划
-                </button>
-              </Form>
-
-              <Form
-                method="post"
-                onSubmit={(e) => {
-                  if (!confirm("确定立即清理所有空闲状态账号吗？此操作不可恢复。")) {
-                    e.preventDefault();
-                  }
-                }}
-              >
-                <input type="hidden" name="intent" value="cleanupIdleNow" />
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="inline-flex items-center justify-center rounded-md bg-rose-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-700 disabled:opacity-50"
-                >
-                  <TrashIcon className="w-4 h-4 mr-2" />
-                  手动立即清理
-                </button>
-              </Form>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Search Filters */}
       <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5 shadow-sm">
@@ -571,12 +436,6 @@ export default function Materials({
           </div>
         </Form>
       </div>
-
-      {actionData?.success && actionData?.message && (
-        <div className="rounded-md bg-emerald-50 dark:bg-emerald-900/20 p-4 text-sm text-emerald-700 dark:text-emerald-200 border border-emerald-100 dark:border-emerald-800">
-          {actionData.message}
-        </div>
-      )}
 
       {actionData?.error && (
         <div className="rounded-md bg-rose-50 dark:bg-rose-900/20 p-4 text-sm text-rose-700 dark:text-rose-200 border border-rose-100 dark:border-rose-800">

@@ -12,6 +12,7 @@ export default [
   layout("routes/layout.tsx", [
     route("dashboard", "routes/dashboard.tsx"),
     route("materials", "routes/materials.tsx"),
+    route("idle-cleanup", "routes/idle-cleanup.tsx"),
     route("users", "routes/users.tsx"),
     route("profile", "routes/profile.tsx"),
     route("conversions", "routes/conversions.tsx"),
