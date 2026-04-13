@@ -23,6 +23,8 @@ let db: Database.Database;
 
 declare global {
   var __db__: Database.Database | undefined;
+  var __idleCleanupSchedulerStarted__: boolean | undefined;
+  var __idleCleanupSchedulerTimer__: NodeJS.Timeout | undefined;
 }
 
 if (process.env.NODE_ENV === "production") {
@@ -102,6 +104,15 @@ db.exec(`
     ip_address TEXT,
     created_at DATETIME DEFAULT (datetime('now', '+8 hours'))
   );
+
+  CREATE TABLE IF NOT EXISTS idle_cleanup_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER DEFAULT 0 NOT NULL,
+    schedule_time TEXT DEFAULT '03:00' NOT NULL,
+    last_run_date TEXT,
+    last_run_at DATETIME,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Migration: Add real_name column if it doesn't exist
@@ -177,5 +188,119 @@ if (userCount.count === 0) {
     insertUser.run(user.email, user.password, user.name, user.role);
   }
 }
+
+db.prepare(
+  `
+    INSERT OR IGNORE INTO idle_cleanup_settings (id, enabled, schedule_time)
+    VALUES (1, 0, '03:00')
+  `
+).run();
+
+type IdleCleanupSettingsRow = {
+  enabled: number;
+  schedule_time: string;
+  last_run_date: string | null;
+};
+
+function getShanghaiDateTimeParts() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value])
+  ) as Record<string, string>;
+
+  const date = `${values.year}-${values.month}-${values.day}`;
+  const time = `${values.hour}:${values.minute}`;
+  const dateTime = `${date} ${values.hour}:${values.minute}:${values.second}`;
+
+  return { date, time, dateTime };
+}
+
+function runIdleCleanupScheduleTick() {
+  try {
+    const now = getShanghaiDateTimeParts();
+
+    const transaction = db.transaction(() => {
+      const settings = db
+        .prepare(
+          `
+            SELECT enabled, schedule_time, last_run_date
+            FROM idle_cleanup_settings
+            WHERE id = 1
+          `
+        )
+        .get() as IdleCleanupSettingsRow | undefined;
+
+      if (!settings || settings.enabled !== 1) {
+        return;
+      }
+
+      if (now.time < settings.schedule_time) {
+        return;
+      }
+
+      if (settings.last_run_date === now.date) {
+        return;
+      }
+
+      const deletedCount = db
+        .prepare("DELETE FROM materials WHERE status = '空闲'")
+        .run().changes;
+
+      db.prepare(
+        `
+          UPDATE idle_cleanup_settings
+          SET last_run_date = ?, last_run_at = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = 1
+        `
+      ).run(now.date, now.dateTime);
+
+      db.prepare(
+        `
+          INSERT INTO audit_logs (user_id, user_name, action, entity, details, ip_address)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `
+      ).run(
+        null,
+        "system",
+        "定时清理空闲账号",
+        "材料",
+        `定时任务执行完成，删除 ${deletedCount} 条空闲账号`,
+        "127.0.0.1"
+      );
+    });
+
+    transaction();
+  } catch (error) {
+    console.error("Idle cleanup scheduler failed:", error);
+  }
+}
+
+function startIdleCleanupScheduler() {
+  if (global.__idleCleanupSchedulerStarted__) {
+    return;
+  }
+
+  runIdleCleanupScheduleTick();
+  global.__idleCleanupSchedulerTimer__ = setInterval(
+    runIdleCleanupScheduleTick,
+    60 * 1000
+  );
+  global.__idleCleanupSchedulerTimer__.unref?.();
+  global.__idleCleanupSchedulerStarted__ = true;
+}
+
+startIdleCleanupScheduler();
 
 export { db };

@@ -2,6 +2,13 @@ import { db } from "../core/db.server";
 import type { Material } from "../types";
 import { incrementUsageCount } from "./conversion.server";
 
+export interface IdleCleanupSettings {
+  enabled: boolean;
+  scheduleTime: string;
+  lastRunDate: string | null;
+  lastRunAt: string | null;
+}
+
 
 export async function getUniqueGameNames(status?: string) {
   let query = `SELECT DISTINCT game_name FROM materials WHERE game_name IS NOT NULL AND game_name != ''`;
@@ -475,4 +482,50 @@ export async function getUserMaterialGameStats(username: string, limit: number =
     LIMIT ?
   `;
   return db.prepare(query).all(username, limit) as { game_name: string; count: number }[];
+}
+
+export async function getIdleCleanupSettings(): Promise<IdleCleanupSettings> {
+  db.prepare(
+    "INSERT OR IGNORE INTO idle_cleanup_settings (id, enabled, schedule_time) VALUES (1, 0, '03:00')"
+  ).run();
+
+  const row = db
+    .prepare(
+      "SELECT enabled, schedule_time, last_run_date, last_run_at FROM idle_cleanup_settings WHERE id = 1"
+    )
+    .get() as
+    | {
+        enabled: number;
+        schedule_time: string;
+        last_run_date: string | null;
+        last_run_at: string | null;
+      }
+    | undefined;
+
+  return {
+    enabled: row?.enabled === 1,
+    scheduleTime: row?.schedule_time || "03:00",
+    lastRunDate: row?.last_run_date || null,
+    lastRunAt: row?.last_run_at || null,
+  };
+}
+
+export async function updateIdleCleanupSettings(data: {
+  enabled: boolean;
+  scheduleTime: string;
+}) {
+  db.prepare(
+    `
+      UPDATE idle_cleanup_settings
+      SET enabled = ?, schedule_time = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = 1
+    `
+  ).run(data.enabled ? 1 : 0, data.scheduleTime);
+
+  return { success: true };
+}
+
+export async function cleanupIdleMaterials() {
+  const result = db.prepare("DELETE FROM materials WHERE status = '空闲'").run();
+  return { success: true, deletedCount: result.changes };
 }

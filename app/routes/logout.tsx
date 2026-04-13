@@ -10,7 +10,7 @@ export async function action({ request }: Route.ActionArgs) {
     const user = await getUserById(userId);
     if (user) {
       createAuditLog({
-        user_id: user.id,
+        user_id: Number(user.id),
         user_name: user.name,
         action: "登出",
         entity: "用户",

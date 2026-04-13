@@ -51,7 +51,7 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: result.message };
     }
     createAuditLog({
-      user_id: user.id,
+      user_id: Number(user.id),
       user_name: user.name,
       action: "删除用户",
       entity: "用户",
@@ -77,7 +77,7 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: result.message };
     }
     createAuditLog({
-      user_id: user.id,
+      user_id: Number(user.id),
       user_name: user.name,
       action: "创建用户",
       entity: "用户",
@@ -101,7 +101,7 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: result.message };
     }
     createAuditLog({
-      user_id: user.id,
+      user_id: Number(user.id),
       user_name: user.name,
       action: "更新用户资料",
       entity: "用户",
@@ -124,7 +124,7 @@ export async function action({ request }: Route.ActionArgs) {
       return { error: result.message };
     }
     createAuditLog({
-      user_id: user.id,
+      user_id: Number(user.id),
       user_name: user.name,
       action: "修改用户密码",
       entity: "用户",
