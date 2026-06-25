@@ -98,7 +98,9 @@ export async function getMaterials(filters: {
 
   // Visibility Logic
   if (filters.viewer && filters.viewer.role !== "admin") {
-    const clause = " AND (m.status = '空闲' OR m.user = ?)";
+    const clause = filters.account_name
+      ? " AND m.status = '已使用' AND m.user = ?"
+      : " AND (m.status = '空闲' OR m.user = ?)";
     query += clause;
     countQuery += clause;
     params.push(filters.viewer.username);

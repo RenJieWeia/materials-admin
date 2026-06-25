@@ -24,7 +24,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   const account_name = url.searchParams.get("account_name") || undefined;
   
   const statusParam = url.searchParams.get("status");
-  const status = statusParam === null ? "空闲" : (statusParam || undefined);
+  const status =
+    statusParam === null && !(user.role !== "admin" && account_name)
+      ? "空闲"
+      : (statusParam || undefined);
 
   const filterUser = url.searchParams.get("user") || undefined;
   const filterUserRealName = url.searchParams.get("user_real_name") || undefined;
@@ -289,7 +292,6 @@ export default function Materials({
               </div>
             </div>
           </div>
-          {user.role === "admin" && (
           <div>
             <label
               htmlFor="account_name"
@@ -305,7 +307,6 @@ export default function Materials({
               className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700/50 text-slate-900 dark:text-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-shadow"
             />
           </div>
-          )}
           {user.role === "admin" && (
           <div>
             <label
