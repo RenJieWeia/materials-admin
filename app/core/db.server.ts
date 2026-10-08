@@ -7,8 +7,12 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath =
-  process.env.NODE_ENV === "production"
+// DATABASE_PATH wins when set, which lets a deployment (or a demo instance)
+// keep the database outside the working directory — required when running the
+// built server from the project root while pointing at a separate data file.
+const dbPath = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : process.env.NODE_ENV === "production"
     ? path.join(process.cwd(), "data", "app.db")
     : path.join(__dirname, "..", "data", "app.db");
 
@@ -37,6 +41,9 @@ if (process.env.NODE_ENV === "production") {
 }
 
 db.pragma("journal_mode = WAL");
+// Always wait for a competing writer instead of failing fast with SQLITE_BUSY,
+// so concurrent claims/extractions queue up rather than erroring out.
+db.pragma("busy_timeout = 5000");
 
 // 创建用户表
 db.exec(`
@@ -170,8 +177,11 @@ const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as {
 };
 
 if (userCount.count === 0) {
+  // INSERT OR IGNORE: several app instances can boot against a brand-new
+  // database at the same time, and the UNIQUE email would otherwise make all
+  // but one of them crash on startup.
   const insertUser = db.prepare(`
-    INSERT INTO users (email, password, name, role)
+    INSERT OR IGNORE INTO users (email, password, name, role)
     VALUES (?, ?, ?, ?)
   `);
 

@@ -39,15 +39,31 @@ export async function incrementConversionCount(userId: number, date: string) {
   return stmt.run(userId, date);
 }
 
-export async function incrementUsageCount(userId: number, date: string) {
+/**
+ * Add `amount` to today's usage counter in a single UPSERT.
+ *
+ * Safe under concurrency: the read-modify-write happens inside SQLite
+ * (`usage_count = usage_count + excluded.usage_count`), so simultaneous claims
+ * can never overwrite each other's increment.
+ */
+export async function incrementUsageCountBy(
+  userId: number,
+  date: string,
+  amount: number
+) {
+  if (!Number.isFinite(amount) || amount <= 0) return;
   const stmt = db.prepare(`
     INSERT INTO daily_conversions (user_id, date, count, pass_count, usage_count, updated_at)
-    VALUES (?, ?, 0, 0, 1, CURRENT_TIMESTAMP)
+    VALUES (?, ?, 0, 0, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(user_id, date) DO UPDATE SET
-      usage_count = usage_count + 1,
+      usage_count = usage_count + excluded.usage_count,
       updated_at = CURRENT_TIMESTAMP
   `);
-  return stmt.run(userId, date);
+  return stmt.run(userId, date, amount);
+}
+
+export async function incrementUsageCount(userId: number, date: string) {
+  return incrementUsageCountBy(userId, date, 1);
 }
 
 export async function getConversion(userId: number, date: string) {

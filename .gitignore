@@ -1,4 +1,4 @@
-.DS_Store
+﻿.DS_Store
 .env
 /node_modules/
 
@@ -8,3 +8,8 @@
 app/data/*
 app/data/app.db-shm
 app/data/app.db-wal
+
+# Isolated demo instance (own database, never the real one)
+/.demo/
+data/app.db-shm
+data/app.db-wal

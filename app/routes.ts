@@ -19,5 +19,6 @@ export default [
     route("audit", "routes/audit.tsx"),
   ]),
   route("resources/material-template", "routes/resources/material-template.ts"),
+  route("resources/export-materials", "routes/resources/export-materials.ts"),
   route("api/import-chunk", "routes/api.import-chunk.ts"),
 ] satisfies RouteConfig;

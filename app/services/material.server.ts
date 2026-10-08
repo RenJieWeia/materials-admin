@@ -1,6 +1,6 @@
 import { db } from "../core/db.server";
 import type { Material } from "../types";
-import { incrementUsageCount } from "./conversion.server";
+import { incrementUsageCountBy } from "./conversion.server";
 
 export interface IdleCleanupSettings {
   enabled: boolean;
@@ -8,6 +8,62 @@ export interface IdleCleanupSettings {
   lastRunDate: string | null;
   lastRunAt: string | null;
 }
+
+/** Upper bound on a single extraction, so one click cannot drain the pool. */
+export const MAX_EXTRACT_COUNT = 200;
+/** Pre-filled quantity in the extraction dialog. */
+export const DEFAULT_EXTRACT_COUNT = 10;
+
+/**
+ * How many candidate/claim passes a batch does before giving up.
+ * One pass is enough while the IMMEDIATE lock is held; the extra passes are a
+ * safety valve in case the lock is ever lost, so a batch still fills up.
+ */
+const MAX_CLAIM_PASSES = 3;
+
+/** `YYYY-MM-DD HH:mm:ss` in server-local time (matches the import format). */
+function formatLocalDateTime(date: Date): string {
+  return (
+    date.getFullYear() +
+    "-" +
+    String(date.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(date.getDate()).padStart(2, "0") +
+    " " +
+    String(date.getHours()).padStart(2, "0") +
+    ":" +
+    String(date.getMinutes()).padStart(2, "0") +
+    ":" +
+    String(date.getSeconds()).padStart(2, "0")
+  );
+}
+
+function getShanghaiDate(date: Date = new Date()): string {
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+}
+
+/** Bump the usage counter for a username; unknown users are ignored. */
+function incrementUsageForUsername(username: string, amount: number): void {
+  const user = db
+    .prepare("SELECT id FROM users WHERE name = ?")
+    .get(username) as { id: number } | undefined;
+  if (user) {
+    incrementUsageCountBy(user.id, getShanghaiDate(), amount);
+  }
+}
+
+/**
+ * Conditional claim used by every write path.
+ *
+ * `status = '空闲'` is part of the WHERE clause rather than a separate check, so
+ * the database itself decides the winner: of two racing updates exactly one
+ * reports `changes === 1`.
+ */
+const CLAIM_ONE_SQL = `
+  UPDATE materials
+  SET status = '已使用', user = ?, usage_time = ?, updated_at = CURRENT_TIMESTAMP
+  WHERE id = ? AND status = '空闲'
+`;
 
 
 export async function getUniqueGameNames(status?: string) {
@@ -135,40 +191,118 @@ export async function getMaterials(filters: {
   };
 }
 
+/**
+ * Claim a single idle material for `username`.
+ *
+ * Runs inside a BEGIN IMMEDIATE transaction: the write lock is taken up front,
+ * so no other writer can slip in between reading the row and claiming it, and
+ * the conditional UPDATE is the final arbiter of who wins the row.
+ */
 export async function claimMaterial(id: number, username: string) {
-  const material = db
-    .prepare("SELECT * FROM materials WHERE id = ?")
-    .get(id) as Material;
+  const claim = db.transaction((materialId: number, name: string): Material => {
+    const material = db
+      .prepare("SELECT * FROM materials WHERE id = ?")
+      .get(materialId) as Material | undefined;
 
-  if (!material) {
-    throw new Error("Material not found");
-  }
+    if (!material) {
+      throw new Error("Material not found");
+    }
 
-  if (material.status !== "空闲") {
-    throw new Error("Material is already in use");
-  }
+    if (material.status !== "空闲") {
+      throw new Error("Material is already in use");
+    }
 
-  const date = new Date();
-  const now = date.getFullYear() + "-" +
-    String(date.getMonth() + 1).padStart(2, '0') + "-" +
-    String(date.getDate()).padStart(2, '0') + " " +
-    String(date.getHours()).padStart(2, '0') + ":" +
-    String(date.getMinutes()).padStart(2, '0') + ":" +
-    String(date.getSeconds()).padStart(2, '0');
+    const now = formatLocalDateTime(new Date());
+    const result = db.prepare(CLAIM_ONE_SQL).run(name, now, materialId);
 
-  db.prepare(
-    "UPDATE materials SET status = '已使用', user = ?, usage_time = ? WHERE id = ?"
-  ).run(username, now, id);
+    // Lost a race against another claim between the read above and this write.
+    if (result.changes !== 1) {
+      throw new Error("Material is already in use");
+    }
 
-  // Update conversion record
-  const user = db.prepare("SELECT id FROM users WHERE name = ?").get(username) as { id: number } | undefined;
-  if (user) {
-    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
-    incrementUsageCount(user.id, today);
-  }
+    incrementUsageForUsername(name, 1);
 
-  return { ...material, status: "已使用", user: username, usage_time: now };
+    return { ...material, status: "已使用", user: name, usage_time: now };
+  });
+
+  return claim.immediate(id, username);
 }
+
+/**
+ * Atomically claim up to `limit` idle materials for `username` and return the
+ * rows that were actually claimed (never rows belonging to someone else).
+ *
+ * Concurrency contract:
+ *  - the whole pick-and-claim sequence runs in ONE `BEGIN IMMEDIATE`
+ *    transaction, which acquires SQLite's write lock before any row is read, so
+ *    a competing extraction cannot interleave with this one;
+ *  - each write still re-checks `status = '空闲'` and is only accepted when the
+ *    database reports exactly 1 changed row, so overlapping claims are
+ *    impossible even if the lock is lost (e.g. multiple app instances on a
+ *    shared database file);
+ *  - the usage counter and the claims commit together, so a crash cannot leave
+ *    materials handed out but uncounted.
+ */
+export function claimIdleMaterialsBatch(
+  username: string,
+  limit: number
+): Material[] {
+  const wanted = Math.max(
+    1,
+    Math.min(Math.floor(limit) || 0, MAX_EXTRACT_COUNT)
+  );
+
+  const claim = db.transaction((name: string, max: number): Material[] => {
+    const now = formatLocalDateTime(new Date());
+    const selectCandidates = db.prepare(
+      `SELECT id FROM materials
+       WHERE status = '空闲'
+       ORDER BY created_at ASC, id ASC
+       LIMIT ?`
+    );
+    const claimOne = db.prepare(CLAIM_ONE_SQL);
+
+    const claimedIds: number[] = [];
+
+    // Claimed rows are no longer '空闲', so every pass naturally sees fresh
+    // candidates without needing to exclude anything.
+    for (let pass = 0; pass < MAX_CLAIM_PASSES && claimedIds.length < max; pass++) {
+      const candidates = selectCandidates.all(max - claimedIds.length) as {
+        id: number;
+      }[];
+      if (candidates.length === 0) break;
+
+      for (const { id } of candidates) {
+        if (claimOne.run(name, now, id).changes === 1) {
+          claimedIds.push(id);
+        }
+      }
+    }
+
+    if (claimedIds.length === 0) return [];
+
+    incrementUsageForUsername(name, claimedIds.length);
+
+    const placeholders = claimedIds.map(() => "?").join(",");
+    return db
+      .prepare(
+        `SELECT * FROM materials
+         WHERE id IN (${placeholders})
+         ORDER BY created_at ASC, id ASC`
+      )
+      .all(...claimedIds) as Material[];
+  });
+
+  return claim.immediate(username, wanted);
+}
+
+export async function getIdleMaterialCount(): Promise<number> {
+  const row = db
+    .prepare("SELECT COUNT(*) as count FROM materials WHERE status = '空闲'")
+    .get() as { count: number };
+  return row.count;
+}
+
 
 export async function getMaterialByAccountName(accountName: string) {
   return db

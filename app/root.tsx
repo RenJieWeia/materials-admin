@@ -12,6 +12,20 @@ import "./app.css";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { UploadProgressProvider } from "./components/UploadProgressContext";
 
+/**
+ * The SSR document must never be reused from cache.
+ *
+ * It references content-hashed asset filenames, so a stale copy keeps asking
+ * for files that no longer exist after a rebuild or deploy — which surfaces as
+ * 404s on /assets/* and a page with no styles. Hashed assets are served by
+ * express.static ahead of this handler and keep their long immutable caching.
+ */
+export function headers(): Headers {
+  return new Headers({
+    "Cache-Control": "no-cache, must-revalidate",
+  });
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
