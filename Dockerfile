@@ -1,12 +1,15 @@
 FROM node:24-alpine AS development-dependencies-env
 COPY . /app
 WORKDIR /app
-RUN npm ci
+# better-sqlite3 ships prebuilt binaries and esbuild uses platform-specific
+# optional dependencies, so lifecycle scripts are not needed. Skipping them
+# avoids requiring python/make/g++ in the Alpine build image.
+RUN npm ci --ignore-scripts
 
 FROM node:24-alpine AS production-dependencies-env
 COPY ./package.json package-lock.json /app/
 WORKDIR /app
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 FROM node:24-alpine AS build-env
 COPY . /app/
