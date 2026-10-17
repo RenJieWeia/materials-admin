@@ -13,7 +13,7 @@
     "@react-router/node": "7.10.1",
     "@react-router/serve": "7.10.1",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.5.0",
+    "better-sqlite3": "^13.0.3",
     "cookie": "^1.1.1",
     "isbot": "^5.1.31",
     "react": "^19.2.3",
@@ -34,5 +34,9 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.7",
     "vite-tsconfig-paths": "^5.1.4"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.3": true,
+    "esbuild@0.27.2": true
   }
 }

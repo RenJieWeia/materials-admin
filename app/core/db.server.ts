@@ -120,6 +120,59 @@ db.exec(`
     last_run_at DATETIME,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- One row per Excel import. Kept even after all duplicates are resolved so
+  -- the import history and every processing decision remain auditable.
+  CREATE TABLE IF NOT EXISTS import_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_token TEXT UNIQUE NOT NULL,
+    file_name TEXT,
+    user_id INTEGER NOT NULL,
+    user_name TEXT NOT NULL,
+    total_rows INTEGER DEFAULT 0 NOT NULL,
+    imported_count INTEGER DEFAULT 0 NOT NULL,
+    duplicate_count INTEGER DEFAULT 0 NOT NULL,
+    invalid_status_count INTEGER DEFAULT 0 NOT NULL,
+    invalid_user_count INTEGER DEFAULT 0 NOT NULL,
+    -- manual = isolate and wait for an administrator; keep_new / cancel =
+    -- apply that decision automatically while the chunk is imported.
+    duplicate_policy TEXT DEFAULT 'manual' NOT NULL,
+    status TEXT DEFAULT 'importing' NOT NULL,
+    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+    completed_at DATETIME
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_import_batches_created_at
+    ON import_batches(created_at DESC);
+
+  -- Duplicate rows are isolated here instead of being written to materials, so
+  -- they cannot be extracted or claimed until an administrator decides.
+  CREATE TABLE IF NOT EXISTS import_duplicates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL,
+    row_number INTEGER NOT NULL,
+    game_name TEXT NOT NULL,
+    account_name TEXT NOT NULL,
+    description TEXT,
+    status TEXT,
+    user TEXT,
+    usage_time TEXT,
+    raw_data TEXT,
+    existing_material_id INTEGER,
+    existing_snapshot TEXT NOT NULL,
+    resolution TEXT DEFAULT 'pending' NOT NULL,
+    resolved_material_id INTEGER,
+    resolved_by_id INTEGER,
+    resolved_by_name TEXT,
+    resolved_at DATETIME,
+    created_at DATETIME DEFAULT (datetime('now', '+8 hours')),
+    FOREIGN KEY (batch_id) REFERENCES import_batches(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_import_duplicates_batch
+    ON import_duplicates(batch_id, resolution);
+  CREATE INDEX IF NOT EXISTS idx_import_duplicates_account
+    ON import_duplicates(account_name);
 `);
 
 // Migration: Add real_name column if it doesn't exist
@@ -169,6 +222,22 @@ try {
   }
 } catch (error) {
   console.error("Migration failed:", error);
+}
+
+// Migration: add the duplicate policy to import batches created before the
+// pre-selection feature existed.
+try {
+  const tableInfo = db.pragma("table_info(import_batches)") as any[];
+  const hasDuplicatePolicy = tableInfo.some(
+    (col) => col.name === "duplicate_policy"
+  );
+  if (!hasDuplicatePolicy) {
+    db.prepare(
+      "ALTER TABLE import_batches ADD COLUMN duplicate_policy TEXT DEFAULT 'manual' NOT NULL"
+    ).run();
+  }
+} catch (error) {
+  console.error("Import batch migration failed:", error);
 }
 
 // 插入示例数据（如果表是空的）

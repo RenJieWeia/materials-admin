@@ -1,8 +1,19 @@
 import type { Route } from "./+types/api.import-chunk";
 import { requireUserId } from "../core/session.server";
-import { getUserById, getAllUsers } from "../services/user.server";
-import { batchCreateMaterials, batchCheckAccountNames } from "../services/material.server";
+import { getUserById } from "../services/user.server";
+import {
+  cancelImportBatch,
+  completeImportBatch,
+  getImportBatchById,
+  getImportBatchByToken,
+  getOrCreateImportBatch,
+  importMaterialsChunk,
+} from "../services/import.server";
 import { createAuditLog } from "../services/audit.server";
+import {
+  DUPLICATE_POLICY_LABELS,
+  type DuplicatePolicy,
+} from "../types";
 
 export async function action({ request }: Route.ActionArgs) {
   const userId = await requireUserId(request);
@@ -15,127 +26,128 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const body = await request.json();
-  const { rows, chunkIndex, totalChunks, isLast } = body as {
-    rows: Array<Record<string, string>>;
-    chunkIndex: number;
-    totalChunks: number;
-    isLast: boolean;
-  };
+  const batchToken =
+    typeof body.batchToken === "string" ? body.batchToken.trim() : "";
 
+  if (!batchToken) {
+    return Response.json({ error: "导入批次标识缺失" }, { status: 400 });
+  }
+
+  // A cancelled import closes the batch immediately. The client sends this
+  // best-effort request when the user clicks "取消导入".
+  if (body.cancel === true) {
+    const cancelled = cancelImportBatch(
+      batchToken,
+      Number(currentUser.id)
+    );
+    if (cancelled) {
+      const batch = getImportBatchByToken(batchToken);
+      if (batch) {
+        createAuditLog(
+          {
+            user_id: Number(currentUser.id),
+            user_name: currentUser.name,
+            action: "取消导入",
+            entity: "导入批次",
+            entity_id: batch.id.toString(),
+            details:
+              `取消导入文件「${batch.file_name || "未命名"}」：` +
+              `已直接导入 ${batch.imported_count} 条，隔离重复 ${batch.duplicate_count} 条`,
+          },
+          request
+        );
+      }
+    }
+    return Response.json({ success: true, cancelled: true });
+  }
+
+  const rows = body.rows as Array<Record<string, string>> | undefined;
   if (!Array.isArray(rows) || rows.length === 0) {
     return Response.json({ error: "No data" }, { status: 400 });
   }
 
-  const allUsers = await getAllUsers();
-  const validUsernames = new Set(allUsers.map((u) => u.name));
+  const rawPolicy = body.duplicatePolicy;
+  if (
+    rawPolicy !== undefined &&
+    rawPolicy !== "manual" &&
+    rawPolicy !== "keep_new" &&
+    rawPolicy !== "cancel"
+  ) {
+    return Response.json({ error: "无效的重复数据处理方式" }, { status: 400 });
+  }
+  const duplicatePolicy: DuplicatePolicy = rawPolicy ?? "manual";
 
-  // Batch check for existing accounts
-  const accountNames = rows
-    .filter((r) => r["账户名称"])
-    .map((r) => r["账户名称"]);
-  const existingAccounts = batchCheckAccountNames(accountNames);
+  const chunkIndex = Number(body.chunkIndex) || 0;
+  const totalChunks = Number(body.totalChunks) || 1;
+  const rawRowOffset = Number(body.rowOffset);
+  const rowOffset =
+    Number.isFinite(rawRowOffset) && rawRowOffset >= 0
+      ? rawRowOffset
+      : chunkIndex * 500;
+  const isLast = body.isLast === true;
 
-  let count = 0;
-  let skipped = 0;
-  const skippedAccounts: string[] = [];
-  let invalidStatusCount = 0;
-  const invalidStatusAccounts: string[] = [];
-  let invalidUserCount = 0;
-  const invalidUserAccounts: string[] = [];
-
-  const toInsert: Array<{
-    game_name: string;
-    account_name: string;
-    description?: string;
-    status?: string;
-    user?: string;
-    usage_time?: string;
-  }> = [];
-
-  for (const row of rows) {
-    if (row["游戏名称"] && row["账户名称"]) {
-      if (existingAccounts.has(row["账户名称"])) {
-        skipped++;
-        skippedAccounts.push(row["账户名称"]);
-        continue;
-      }
-
-      let status = row["使用状态"] || row["状态"] || "空闲";
-      if (status !== "空闲" && status !== "已使用") {
-        invalidStatusCount++;
-        invalidStatusAccounts.push(row["账户名称"]);
-        continue;
-      }
-
-      let user: string | undefined = row["使用人"];
-      let usage_time: string | undefined = row["使用时间"];
-
-      if (status === "空闲") {
-        user = undefined;
-        usage_time = undefined;
-      } else if (status === "已使用") {
-        if (!validUsernames.has(user)) {
-          invalidUserCount++;
-          invalidUserAccounts.push(row["账户名称"]);
-          continue;
-        }
-        if (!usage_time) {
-          const date = new Date();
-          usage_time =
-            date.getFullYear() +
-            "-" +
-            String(date.getMonth() + 1).padStart(2, "0") +
-            "-" +
-            String(date.getDate()).padStart(2, "0") +
-            " " +
-            String(date.getHours()).padStart(2, "0") +
-            ":" +
-            String(date.getMinutes()).padStart(2, "0") +
-            ":" +
-            String(date.getSeconds()).padStart(2, "0");
-        }
-      }
-
-      // Also add to existingAccounts to prevent duplicates within this chunk
-      existingAccounts.add(row["账户名称"]);
-
-      toInsert.push({
-        game_name: row["游戏名称"],
-        account_name: row["账户名称"],
-        description: row["描述"],
-        status,
-        user,
-        usage_time,
-      });
-      count++;
-    }
+  let batch;
+  try {
+    batch = getOrCreateImportBatch({
+      batchToken,
+      fileName: typeof body.fileName === "string" ? body.fileName : null,
+      userId: Number(currentUser.id),
+      userName: currentUser.name,
+      totalRows: Number(body.totalRows) || rowOffset + rows.length,
+      duplicatePolicy,
+    });
+  } catch (error) {
+    return Response.json(
+      { error: (error as Error).message },
+      { status: 400 }
+    );
   }
 
-  // Batch insert using transaction
-  if (toInsert.length > 0) {
-    batchCreateMaterials(toInsert);
+  let result;
+  try {
+    result = importMaterialsChunk({
+      batchId: batch.id,
+      rows,
+      rowOffset,
+    });
+  } catch (error) {
+    return Response.json(
+      { error: (error as Error).message },
+      { status: 400 }
+    );
   }
 
-  // Log on last chunk
   if (isLast) {
-    createAuditLog({
-      user_id: Number(currentUser.id),
-      user_name: currentUser.name,
-      action: "导入材料",
-      entity: "材料",
-      details: `分批导入完成 (共 ${totalChunks} 批)`,
-    }, request);
+    completeImportBatch(batch.id);
+
+    const finished = getImportBatchById(batch.id);
+    if (finished) {
+      createAuditLog(
+        {
+          user_id: Number(currentUser.id),
+          user_name: currentUser.name,
+          action: "导入材料",
+          entity: "导入批次",
+          entity_id: finished.id.toString(),
+          details:
+            `导入文件「${finished.file_name || "未命名"}」完成：共 ${finished.total_rows} 行，` +
+            `成功导入 ${finished.imported_count} 条，隔离重复 ${finished.duplicate_count} 条` +
+            `（待处理 ${finished.pending_count} 条），重复策略：` +
+            `${DUPLICATE_POLICY_LABELS[finished.duplicate_policy]}` +
+            `，状态异常 ${finished.invalid_status_count} 条，` +
+            `使用人异常 ${finished.invalid_user_count} 条`,
+        },
+        request
+      );
+    }
   }
 
   return Response.json({
     success: true,
+    batchId: batch.id,
+    duplicatePolicy: batch.duplicate_policy,
     chunkIndex,
-    count,
-    skipped,
-    skippedAccounts: skippedAccounts.slice(0, 3),
-    invalidStatusCount,
-    invalidStatusAccounts: invalidStatusAccounts.slice(0, 3),
-    invalidUserCount,
-    invalidUserAccounts: invalidUserAccounts.slice(0, 3),
+    totalChunks,
+    ...result,
   });
 }

@@ -5,6 +5,7 @@ import {
   DEFAULT_EXTRACT_COUNT,
   MAX_EXTRACT_COUNT,
   claimIdleMaterialsBatch,
+  type MaterialExtractOrder,
 } from "../../services/material.server";
 import { createAuditLog } from "../../services/audit.server";
 import {
@@ -33,6 +34,15 @@ function timestampSuffix(date: Date = new Date()): string {
     `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
     `_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
   );
+}
+
+/** Keep a game name usable inside a download filename on every OS. */
+function filenameFragment(value: string): string {
+  const cleaned = value
+    .replace(/[\\/:*?"<>|\s]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24);
+  return cleaned || "指定游戏";
 }
 
 /**
@@ -90,14 +100,34 @@ export async function action({ request }: Route.ActionArgs) {
       ? Math.min(parsedCount, MAX_EXTRACT_COUNT)
       : DEFAULT_EXTRACT_COUNT;
 
+  // "oldest" is the historical behaviour, so a form without `order` keeps
+  // working exactly as before.
+  const rawOrder = formData.get("order");
+  const order: MaterialExtractOrder =
+    rawOrder === "newest" ? "newest" : "oldest";
+
+  const rawGame = formData.get("game");
+  const gameName = typeof rawGame === "string" ? rawGame.trim() : "";
+  if (gameName.length > 100) {
+    return Response.json(
+      { ok: false, error: "游戏名称过长，请重新选择。" },
+      { status: 400 }
+    );
+  }
+
   // Claiming is the critical section; it is atomic and returns only rows that
   // this employee actually won.
-  const claimed = claimIdleMaterialsBatch(user.name, requestedCount);
+  const claimed = claimIdleMaterialsBatch(user.name, requestedCount, {
+    order,
+    gameName: gameName || null,
+  });
 
   if (claimed.length === 0) {
     return Response.json({
       ok: false,
-      error: "当前没有空闲料子可提取，请稍后再试。",
+      error: gameName
+        ? `游戏「${gameName}」当前没有空闲料子，请重新选择。`
+        : "当前没有空闲料子可提取，请稍后再试。",
     });
   }
 
@@ -110,11 +140,12 @@ export async function action({ request }: Route.ActionArgs) {
     usage_time: material.usage_time,
   }));
 
+  const orderLabel = order === "newest" ? "最新" : "最早";
   const payload = buildExport(
     format,
     EXPORT_COLUMNS,
     rows,
-    `料子提取_${timestampSuffix()}`
+    `料子提取_${gameName ? `${filenameFragment(gameName)}_` : ""}${orderLabel}_${timestampSuffix()}`
   );
 
   createAuditLog(
@@ -124,7 +155,7 @@ export async function action({ request }: Route.ActionArgs) {
       action: "提取料子",
       entity: "材料",
       entity_id: claimed.map((material) => material.id).join(","),
-      details: `批量提取空闲料子 ${claimed.length} 条（请求 ${requestedCount} 条，格式 ${format ?? "默认"}）`,
+      details: `批量提取空闲料子 ${claimed.length} 条（请求 ${requestedCount} 条，顺序 ${order === "newest" ? "最新优先" : "最早优先"}，游戏 ${gameName || "全部"}，格式 ${format ?? "默认"}）`,
     },
     request
   );
@@ -133,6 +164,8 @@ export async function action({ request }: Route.ActionArgs) {
     ok: true,
     count: claimed.length,
     requestedCount,
+    order,
+    gameName: gameName || null,
     ...payload,
   });
 }

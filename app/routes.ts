@@ -17,6 +17,8 @@ export default [
     route("profile", "routes/profile.tsx"),
     route("conversions", "routes/conversions.tsx"),
     route("audit", "routes/audit.tsx"),
+    route("imports", "routes/imports.tsx"),
+    route("imports/:id", "routes/import-detail.tsx"),
   ]),
   route("resources/material-template", "routes/resources/material-template.ts"),
   route("resources/export-materials", "routes/resources/export-materials.ts"),

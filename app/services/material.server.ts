@@ -228,6 +228,16 @@ export async function claimMaterial(id: number, username: string) {
   return claim.immediate(id, username);
 }
 
+/** Extraction order: oldest stock first, or the most recently imported first. */
+export type MaterialExtractOrder = "oldest" | "newest";
+
+export interface ClaimIdleMaterialsOptions {
+  /** Defaults to "oldest", which is also the pre-existing behaviour. */
+  order?: MaterialExtractOrder;
+  /** Restrict the extraction to one exact game name. Empty means all games. */
+  gameName?: string | null;
+}
+
 /**
  * Atomically claim up to `limit` idle materials for `username` and return the
  * rows that were actually claimed (never rows belonging to someone else).
@@ -245,55 +255,91 @@ export async function claimMaterial(id: number, username: string) {
  */
 export function claimIdleMaterialsBatch(
   username: string,
-  limit: number
+  limit: number,
+  options: ClaimIdleMaterialsOptions = {}
 ): Material[] {
   const wanted = Math.max(
     1,
     Math.min(Math.floor(limit) || 0, MAX_EXTRACT_COUNT)
   );
+  const order: MaterialExtractOrder =
+    options.order === "newest" ? "newest" : "oldest";
+  // Fixed direction strings (never interpolated user input) keep the ORDER BY
+  // safe; the game filter itself is a bound parameter.
+  const direction = order === "newest" ? "DESC" : "ASC";
+  const gameName = options.gameName?.trim() || null;
 
-  const claim = db.transaction((name: string, max: number): Material[] => {
-    const now = formatLocalDateTime(new Date());
-    const selectCandidates = db.prepare(
-      `SELECT id FROM materials
-       WHERE status = '空闲'
-       ORDER BY created_at ASC, id ASC
-       LIMIT ?`
-    );
-    const claimOne = db.prepare(CLAIM_ONE_SQL);
+  const claim = db.transaction(
+    (name: string, max: number, game: string | null): Material[] => {
+      const now = formatLocalDateTime(new Date());
+      const gameClause = game ? " AND game_name = ?" : "";
+      const gameParams: string[] = game ? [game] : [];
+      const selectCandidates = db.prepare(
+        `SELECT id FROM materials
+         WHERE status = '空闲'${gameClause}
+         ORDER BY created_at ${direction}, id ${direction}
+         LIMIT ?`
+      );
+      const claimOne = db.prepare(CLAIM_ONE_SQL);
 
-    const claimedIds: number[] = [];
+      const claimedIds: number[] = [];
 
-    // Claimed rows are no longer '空闲', so every pass naturally sees fresh
-    // candidates without needing to exclude anything.
-    for (let pass = 0; pass < MAX_CLAIM_PASSES && claimedIds.length < max; pass++) {
-      const candidates = selectCandidates.all(max - claimedIds.length) as {
-        id: number;
-      }[];
-      if (candidates.length === 0) break;
+      // Claimed rows are no longer '空闲', so every pass naturally sees fresh
+      // candidates without needing to exclude anything.
+      for (
+        let pass = 0;
+        pass < MAX_CLAIM_PASSES && claimedIds.length < max;
+        pass++
+      ) {
+        const candidates = selectCandidates.all(
+          ...gameParams,
+          max - claimedIds.length
+        ) as {
+          id: number;
+        }[];
+        if (candidates.length === 0) break;
 
-      for (const { id } of candidates) {
-        if (claimOne.run(name, now, id).changes === 1) {
-          claimedIds.push(id);
+        for (const { id } of candidates) {
+          if (claimOne.run(name, now, id).changes === 1) {
+            claimedIds.push(id);
+          }
         }
       }
+
+      if (claimedIds.length === 0) return [];
+
+      incrementUsageForUsername(name, claimedIds.length);
+
+      const placeholders = claimedIds.map(() => "?").join(",");
+      return db
+        .prepare(
+          `SELECT * FROM materials
+           WHERE id IN (${placeholders})
+           ORDER BY created_at ${direction}, id ${direction}`
+        )
+        .all(...claimedIds) as Material[];
     }
+  );
 
-    if (claimedIds.length === 0) return [];
+  return claim.immediate(username, wanted, gameName);
+}
 
-    incrementUsageForUsername(name, claimedIds.length);
-
-    const placeholders = claimedIds.map(() => "?").join(",");
-    return db
-      .prepare(
-        `SELECT * FROM materials
-         WHERE id IN (${placeholders})
-         ORDER BY created_at ASC, id ASC`
-      )
-      .all(...claimedIds) as Material[];
-  });
-
-  return claim.immediate(username, wanted);
+/**
+ * Game names that currently have idle stock, with how many accounts are
+ * available. Used by the extraction dialog to offer a concrete game filter.
+ */
+export async function getIdleMaterialGameOptions(): Promise<
+  { game_name: string; count: number }[]
+> {
+  return db
+    .prepare(
+      `SELECT game_name, COUNT(*) as count
+       FROM materials
+       WHERE status = '空闲' AND game_name IS NOT NULL AND game_name != ''
+       GROUP BY game_name
+       ORDER BY count DESC, game_name ASC`
+    )
+    .all() as { game_name: string; count: number }[];
 }
 
 export async function getIdleMaterialCount(): Promise<number> {

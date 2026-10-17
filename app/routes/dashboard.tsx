@@ -1,10 +1,8 @@
 import {
   Form,
   useLoaderData,
-  useActionData,
   useNavigation,
   useFetcher,
-  useRevalidator,
   isRouteErrorResponse,
   Link,
 } from "react-router";
@@ -12,6 +10,7 @@ import { useState, useEffect, useRef } from "react";
 import type { Route } from "./+types/dashboard";
 import { requireUserId } from "../core/session.server";
 import { getUserById } from "../services/user.server";
+import { ExtractMaterialsPanel } from "../components/ExtractMaterialsPanel";
 import {
   recordConversion,
   getConversion,
@@ -32,6 +31,7 @@ import {
   getIdleMaterialGameStats,
   getUserMaterialGameStats,
   getIdleMaterialCount,
+  getIdleMaterialGameOptions,
   MAX_EXTRACT_COUNT,
   DEFAULT_EXTRACT_COUNT,
 } from "../services/material.server";
@@ -71,61 +71,10 @@ import {
   PlusIcon,
   ArrowTrendingDownIcon,
   ClockIcon,
-  ListBulletIcon,
   TrashIcon,
   CheckCircleIcon,
   Squares2X2Icon,
-  ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
-
-/** Response shape of POST /resources/export-materials. */
-type ExtractResponse =
-  | {
-      ok: true;
-      count: number;
-      requestedCount: number;
-      filename: string;
-      contentType: string;
-      encoding: "utf8" | "base64";
-      content: string;
-    }
-  | { ok: false; error: string };
-
-function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
-  const binary = window.atob(base64);
-  // Allocate over an explicit ArrayBuffer so the result is a valid BlobPart.
-  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/**
- * Write a server-rendered export payload to disk.
- *
- * The server owns the filename and the serialisation (see export.server.ts);
- * the browser only turns the bytes into a download, which keeps every format —
- * including future binary ones — working without touching this component.
- */
-function saveExportToDisk(payload: Extract<ExtractResponse, { ok: true }>) {
-  const blob =
-    payload.encoding === "base64"
-      ? new Blob([base64ToBytes(payload.content)], {
-          type: payload.contentType,
-        })
-      : new Blob([payload.content], { type: payload.contentType });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = payload.filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  // Revoking straight away can cancel the download in some browsers.
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireUserId(request);
@@ -253,6 +202,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       maxCount: MAX_EXTRACT_COUNT,
       defaultCount: DEFAULT_EXTRACT_COUNT,
       formats: listExportFormats(),
+      games: await getIdleMaterialGameOptions(),
     },
   };
 }
@@ -409,84 +359,6 @@ export default function Dashboard({
     }
   }, [actionData]);
 
-  // ── 提取料子 ────────────────────────────────────────────────────────────────
-  // A lightweight popover anchored to the button, not a full-screen modal: the
-  // action only needs a quantity and a format, so it should not take over the
-  // page or block the dashboard behind it.
-  const [isExtractOpen, setIsExtractOpen] = useState(false);
-  // Kept as a string so the field can be cleared while typing; the server
-  // validates the value and clamps it to MAX_EXTRACT_COUNT.
-  const [extractCount, setExtractCount] = useState(String(extract.defaultCount));
-  const [extractFormat, setExtractFormat] = useState(
-    extract.formats[0]?.key ?? "csv"
-  );
-  const [extractMessage, setExtractMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
-  const extractFetcher = useFetcher<ExtractResponse>();
-  const revalidator = useRevalidator();
-  const extractPanelRef = useRef<HTMLDivElement>(null);
-  /** "全部" cannot exceed what one request is allowed to claim. */
-  const allIdleCount = Math.min(extract.idleCount, extract.maxCount);
-
-  const openExtractPanel = () => {
-    setExtractCount(String(extract.defaultCount));
-    setExtractFormat(extract.formats[0]?.key ?? "csv");
-    setExtractMessage(null);
-    setIsExtractOpen(true);
-  };
-
-  // Dismiss on outside click / Escape, like any other popover.
-  useEffect(() => {
-    if (!isExtractOpen) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!extractPanelRef.current?.contains(event.target as Node)) {
-        setIsExtractOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsExtractOpen(false);
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isExtractOpen]);
-
-  // Success notices fade out on their own; errors stay until the user acts.
-  useEffect(() => {
-    if (extractMessage?.type !== "success") return;
-    const timer = window.setTimeout(() => setExtractMessage(null), 6000);
-    return () => window.clearTimeout(timer);
-  }, [extractMessage]);
-
-  useEffect(() => {
-    const data = extractFetcher.data;
-    // Ignore the HTML payload we get back when the session expired and the
-    // request was redirected to /login.
-    if (!data || typeof data.ok !== "boolean") return;
-
-    if (!data.ok) {
-      setExtractMessage({ type: "error", text: data.error || "提取失败" });
-      return;
-    }
-
-    saveExportToDisk(data);
-    setExtractMessage({
-      type: "success",
-      text: `已提取 ${data.count} 条料子，文件已开始下载。`,
-    });
-    setIsExtractOpen(false);
-    // Refresh the loader so the idle count and dashboard numbers stay honest.
-    revalidator.revalidate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extractFetcher.data]);
-
   // Professional Business Palette
   const COLORS = ["#2563eb", "#0d9488", "#d97706", "#4f46e5", "#be123c"];
 
@@ -507,13 +379,16 @@ export default function Dashboard({
               </p>
             </div>
           </div>
-          <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
-            {new Date().toLocaleDateString("zh-CN", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-              weekday: "long",
-            })}
+          <div className="flex items-center gap-3">
+            <ExtractMaterialsPanel extract={extract} />
+            <div className="hidden text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm sm:block">
+              {new Date().toLocaleDateString("zh-CN", {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+                weekday: "long",
+              })}
+            </div>
           </div>
         </div>
 
@@ -1055,142 +930,8 @@ export default function Dashboard({
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="relative" ref={extractPanelRef}>
-            <button
-              type="button"
-              onClick={() => (isExtractOpen ? setIsExtractOpen(false) : openExtractPanel())}
-              aria-haspopup="dialog"
-              aria-expanded={isExtractOpen}
-              title={`当前空闲 ${extract.idleCount} 条`}
-              className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium shadow-sm transition-colors active:scale-[0.98] ${
-                isExtractOpen
-                  ? "bg-blue-700 text-white"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              <ArrowDownTrayIcon className="h-4 w-4" />
-              提取料子
-              <span className="rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
-                {extract.idleCount}
-              </span>
-            </button>
-
-            {isExtractOpen && (
-              <div
-                role="dialog"
-                aria-label="提取料子"
-                className="absolute right-0 z-40 mt-2 w-80 origin-top-right rounded-lg border border-slate-200 bg-white p-4 text-left shadow-lg dark:border-slate-700 dark:bg-slate-800"
-              >
-                <div className="mb-3">
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                    提取料子
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                    当前空闲 {extract.idleCount} 条 · 单次最多 {extract.maxCount} 条
-                  </p>
-                </div>
-
-                <extractFetcher.Form
-                  method="post"
-                  action="/resources/export-materials"
-                >
-                  <label
-                    htmlFor="extract-count"
-                    className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                  >
-                    提取数量
-                  </label>
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {[5, 10, 20].map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setExtractCount(String(preset))}
-                        className={`rounded px-2 py-1 text-xs font-medium tabular-nums transition-colors ${
-                          extractCount === String(preset)
-                            ? "bg-blue-600 text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-                        }`}
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setExtractCount(String(allIdleCount))}
-                      disabled={extract.idleCount === 0}
-                      className={`rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-40 ${
-                        extractCount === String(allIdleCount) &&
-                        extract.idleCount > 0
-                          ? "bg-blue-600 text-white"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-                      }`}
-                    >
-                      全部
-                    </button>
-                  </div>
-
-                  <input
-                    type="number"
-                    id="extract-count"
-                    name="count"
-                    min="1"
-                    max={extract.maxCount}
-                    required
-                    value={extractCount}
-                    onChange={(event) => setExtractCount(event.target.value)}
-                    placeholder={`1 - ${extract.maxCount}`}
-                    className="mb-3 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm tabular-nums text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700/50 dark:text-white"
-                  />
-
-                  <label
-                    htmlFor="extract-format"
-                    className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                  >
-                    导出格式
-                  </label>
-                  <select
-                    id="extract-format"
-                    name="format"
-                    value={extractFormat}
-                    onChange={(event) => setExtractFormat(event.target.value)}
-                    className="mb-3 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700/50 dark:text-white"
-                  >
-                    {extract.formats.map((format) => (
-                      <option key={format.key} value={format.key}>
-                        {format.label}
-                      </option>
-                    ))}
-                  </select>
-
-                  {extractMessage?.type === "error" && (
-                    <div className="mb-3 rounded-md bg-rose-50 p-2.5 text-xs text-rose-600 dark:bg-rose-900/20 dark:text-rose-400">
-                      {extractMessage.text}
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsExtractOpen(false)}
-                      className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={extractFetcher.state !== "idle"}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      <ArrowDownTrayIcon className="h-3.5 w-3.5" />
-                      {extractFetcher.state !== "idle" ? "提取中..." : "提取并下载"}
-                    </button>
-                  </div>
-                </extractFetcher.Form>
-              </div>
-            )}
-          </div>
-          <div className="text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm">
+          <ExtractMaterialsPanel extract={extract} />
+          <div className="hidden text-xs font-medium px-3 py-1.5 bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-sm sm:block">
             {new Date().toLocaleDateString("zh-CN", {
               year: "numeric",
               month: "long",
@@ -1200,19 +941,6 @@ export default function Dashboard({
           </div>
         </div>
       </div>
-
-      {extractMessage?.type === "success" && (
-        <div className="flex items-center justify-between rounded-md border px-4 py-3 text-sm border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400">
-          <span>{extractMessage.text}</span>
-          <button
-            type="button"
-            onClick={() => setExtractMessage(null)}
-            className="ml-4 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-          >
-            关闭
-          </button>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Today Conversion Card */}

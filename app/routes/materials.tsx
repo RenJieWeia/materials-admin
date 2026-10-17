@@ -1,4 +1,4 @@
-import { Form, useNavigation, useSubmit, useFetcher, useLoaderData, useSearchParams } from "react-router";
+import { Form, Link, useNavigation, useSubmit, useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { ArrowDownTrayIcon, DocumentArrowUpIcon, MagnifyingGlassIcon, ArrowPathIcon, ArchiveBoxIcon } from "@heroicons/react/24/outline";
@@ -13,6 +13,28 @@ import {
 import { createAuditLog } from "../services/audit.server";
 import Pagination from "../components/Pagination";
 import { useUploadProgress } from "../components/UploadProgressContext";
+import {
+  DUPLICATE_POLICY_LABELS,
+  type DuplicatePolicy,
+} from "../types";
+
+const IMPORT_POLICY_OPTIONS: {
+  value: DuplicatePolicy;
+  description: string;
+}[] = [
+  {
+    value: "manual",
+    description: "导入完成后，在导入管理中逐条或整批确认。",
+  },
+  {
+    value: "keep_new",
+    description: "自动保留导入的新数据，原账户标记为失效。",
+  },
+  {
+    value: "cancel",
+    description: "自动取消重复行，原账户保持不变。",
+  },
+];
 
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireUserId(request);
@@ -125,6 +147,8 @@ export default function Materials({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isImportOptionsOpen, setIsImportOptionsOpen] = useState(false);
+  const [importPolicy, setImportPolicy] = useState<DuplicatePolicy>("manual");
   const { state: uploadState, startUpload } = useUploadProgress();
   const isUploading = uploadState.status === "uploading";
 
@@ -193,14 +217,6 @@ export default function Materials({
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      if (
-        !confirm(
-          "确定要导入该 Excel 文件吗？请确保列名为：游戏名称, 账户名称, 描述, 状态, 使用人, 使用时间"
-        )
-      ) {
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
-      }
       // Parse Excel client-side and start chunked background upload
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -214,8 +230,12 @@ export default function Materials({
           showToast("error", "文件中没有数据");
           return;
         }
-        showToast("success", `已解析 ${data.length} 条数据，开始后台导入...`);
-        startUpload(data);
+        setIsImportOptionsOpen(false);
+        showToast(
+          "success",
+          `已解析 ${data.length} 条数据，重复策略：${DUPLICATE_POLICY_LABELS[importPolicy]}，开始后台导入...`
+        );
+        startUpload(data, file.name, importPolicy);
       };
       reader.readAsArrayBuffer(file);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -246,21 +266,31 @@ export default function Materials({
             <ArrowDownTrayIcon className="w-4 h-4 mr-2 text-slate-500" />
             下载模板
           </a>
-          <input
-            type="file"
-            accept=".xlsx, .xls"
-            className="hidden"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isSubmitting || isUploading}
-            className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 transition-colors"
-          >
-            <DocumentArrowUpIcon className="w-4 h-4 mr-2" />
-            {isUploading ? "导入中..." : "Excel 导入"}
-          </button>
+          {user.role === "admin" && (
+            <>
+              <Link
+                to="/imports"
+                className="inline-flex items-center justify-center rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+              >
+                导入管理
+              </Link>
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                className="hidden"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+              />
+              <button
+                onClick={() => setIsImportOptionsOpen(true)}
+                disabled={isSubmitting || isUploading}
+                className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 transition-colors"
+              >
+                <DocumentArrowUpIcon className="w-4 h-4 mr-2" />
+                {isUploading ? "导入中..." : "Excel 导入"}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -392,6 +422,7 @@ export default function Materials({
                 <option value="">全部</option>
                 <option value="空闲">空闲</option>
                 <option value="已使用">已使用</option>
+                <option value="失效">失效</option>
               </select>
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
                 <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" fillRule="evenodd"></path></svg>
@@ -509,6 +540,8 @@ export default function Materials({
                         className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
                           material.status === "已使用"
                             ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
+                            : material.status === "失效"
+                            ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
                             : "bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300"
                         }`}
                       >
@@ -553,6 +586,100 @@ export default function Materials({
           }}
         />
       </div>
+
+      {/* Import options: choose the duplicate policy before picking a file */}
+      {isImportOptionsOpen && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[1px]"
+          onClick={() => setIsImportOptionsOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Excel 导入设置"
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-lg overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-800"
+          >
+            <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+                Excel 导入设置
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                先选择重复数据的处理方式，再选择 Excel 文件。未重复的数据始终正常导入。
+              </p>
+            </div>
+
+            <div className="space-y-2.5 px-5 py-4">
+              {IMPORT_POLICY_OPTIONS.map((option) => {
+                const active = importPolicy === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className={`block cursor-pointer rounded-lg border p-3 transition-colors ${
+                      active
+                        ? "border-blue-500 bg-blue-50 dark:border-blue-500 dark:bg-blue-900/20"
+                        : "border-slate-200 hover:border-slate-300 dark:border-slate-600 dark:hover:border-slate-500"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="duplicatePolicy"
+                      value={option.value}
+                      checked={active}
+                      onChange={() => setImportPolicy(option.value)}
+                      className="sr-only"
+                    />
+                    <span
+                      className={`flex items-center gap-2 text-sm font-semibold ${
+                        active
+                          ? "text-blue-700 dark:text-blue-300"
+                          : "text-slate-800 dark:text-slate-100"
+                      }`}
+                    >
+                      <span
+                        className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                          active
+                            ? "border-blue-600 bg-blue-600"
+                            : "border-slate-300 dark:border-slate-500"
+                        }`}
+                      >
+                        {active && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                        )}
+                      </span>
+                      {DUPLICATE_POLICY_LABELS[option.value]}
+                    </span>
+                    <span className="mt-1 block pl-6 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      {option.description}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 dark:border-slate-700 dark:bg-slate-700/30">
+              <button
+                type="button"
+                onClick={() => setIsImportOptionsOpen(false)}
+                className="rounded-md px-3 py-2 text-xs font-medium text-slate-500 transition-colors hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportOptionsOpen(false);
+                  fileInputRef.current?.click();
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-emerald-700"
+              >
+                <DocumentArrowUpIcon className="h-4 w-4" />
+                选择文件并导入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {toast && (

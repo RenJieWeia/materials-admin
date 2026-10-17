@@ -1,4 +1,6 @@
+import { Link } from "react-router";
 import { useUploadProgress } from "./UploadProgressContext";
+import { DUPLICATE_POLICY_LABELS } from "../types";
 import { DocumentArrowUpIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
 
 export default function UploadProgressIndicator() {
@@ -20,10 +22,19 @@ export default function UploadProgressIndicator() {
   if (isDone || isError) {
     const r = state.result;
     summary = `成功导入 ${r.count} 条`;
-    if (r.skipped > 0) {
-      summary += `，跳过 ${r.skipped} 条重复`;
-      if (r.skippedAccounts.length > 0) {
-        summary += ` (${r.skippedAccounts.join(", ")}${r.skipped > 3 ? " 等" : ""})`;
+    if (r.duplicateCount > 0) {
+      summary += `，重复数据 ${r.duplicateCount} 条`;
+      if (state.duplicatePolicy === "keep_new") {
+        summary += `（${DUPLICATE_POLICY_LABELS.keep_new} ${r.autoKeptCount} 条）`;
+      } else if (state.duplicatePolicy === "cancel") {
+        summary += `（${DUPLICATE_POLICY_LABELS.cancel} ${r.autoCancelledCount} 条）`;
+      } else {
+        summary += `（已隔离待处理）`;
+      }
+      if (r.duplicateAccounts.length > 0) {
+        summary += ` (${r.duplicateAccounts.join(", ")}${
+          r.duplicateCount > 3 ? " 等" : ""
+        })`;
       }
     }
     if (r.invalidStatusCount > 0) {
@@ -138,11 +149,22 @@ export default function UploadProgressIndicator() {
         )}
 
         {/* Running result */}
-        {(state.result.count > 0 || state.result.skipped > 0) && (
+        {(state.result.count > 0 || state.result.duplicateCount > 0) && (
           <div className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700/50 rounded-md px-3 py-2">
             已导入 <span className="font-medium text-emerald-600 dark:text-emerald-400">{state.result.count}</span> 条
-            {state.result.skipped > 0 && (
-              <span>，跳过 <span className="font-medium text-amber-600 dark:text-amber-400">{state.result.skipped}</span> 条重复</span>
+            {state.result.duplicateCount > 0 && (
+              <span>
+                ，重复{" "}
+                <span className="font-medium text-amber-600 dark:text-amber-400">
+                  {state.result.duplicateCount}
+                </span>{" "}
+                条
+                {state.duplicatePolicy === "keep_new"
+                  ? `（自动保留 ${state.result.autoKeptCount} 条）`
+                  : state.duplicatePolicy === "cancel"
+                  ? `（自动取消 ${state.result.autoCancelledCount} 条）`
+                  : "（隔离待处理）"}
+              </span>
             )}
             {state.result.invalidStatusCount > 0 && (
               <span>，<span className="font-medium text-rose-600 dark:text-rose-400">{state.result.invalidStatusCount}</span> 条状态异常</span>
@@ -165,6 +187,19 @@ export default function UploadProgressIndicator() {
             {summary}
           </div>
         )}
+
+        {(isDone || isError) &&
+          state.batchId &&
+          state.result.duplicateCount > 0 && (
+            <Link
+              to={`/imports/${state.batchId}`}
+              className="flex items-center justify-center rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30"
+            >
+              {state.duplicatePolicy === "manual"
+                ? `查看并处理 ${state.result.duplicateCount} 条重复数据`
+                : "查看自动处理记录"}
+            </Link>
+          )}
 
         {/* Cancel button */}
         {isUploading && (
