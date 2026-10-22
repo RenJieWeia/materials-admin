@@ -41,6 +41,10 @@ if (process.env.NODE_ENV === "production") {
 }
 
 db.pragma("journal_mode = WAL");
+// In WAL mode NORMAL only skips the per-commit fsync; the WAL is still synced
+// at every checkpoint, so a crash cannot corrupt the database. This removes a
+// large part of the commit cost during chunked imports.
+db.pragma("synchronous = NORMAL");
 // Always wait for a competing writer instead of failing fast with SQLITE_BUSY,
 // so concurrent claims/extractions queue up rather than erroring out.
 db.pragma("busy_timeout = 5000");
@@ -67,6 +71,10 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  -- materials.user stores the username, not the numeric id, so every list page
+  -- joins users by name.
+  CREATE INDEX IF NOT EXISTS idx_users_name ON users(name);
+
   CREATE TABLE IF NOT EXISTS materials (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     game_name TEXT NOT NULL,
@@ -78,6 +86,22 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Import de-duplication and every list/dashboard filter run against these
+  -- columns. Without indexes SQLite scans the whole materials table for each
+  -- duplicate row, which is what made large imports freeze the process.
+  CREATE INDEX IF NOT EXISTS idx_materials_account_status
+    ON materials(account_name, status);
+  CREATE INDEX IF NOT EXISTS idx_materials_status_created
+    ON materials(status, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_materials_created_at
+    ON materials(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_materials_game_name
+    ON materials(game_name);
+  CREATE INDEX IF NOT EXISTS idx_materials_user
+    ON materials(user);
+  CREATE INDEX IF NOT EXISTS idx_materials_usage_time
+    ON materials(usage_time);
 
   CREATE TABLE IF NOT EXISTS daily_conversions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +197,9 @@ db.exec(`
     ON import_duplicates(batch_id, resolution);
   CREATE INDEX IF NOT EXISTS idx_import_duplicates_account
     ON import_duplicates(account_name);
+  -- The duplicate list paginates pending rows ordered by row_number.
+  CREATE INDEX IF NOT EXISTS idx_import_duplicates_batch_row
+    ON import_duplicates(batch_id, resolution, row_number);
 `);
 
 // Migration: Add real_name column if it doesn't exist

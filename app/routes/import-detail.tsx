@@ -4,7 +4,7 @@ import {
   useLoaderData,
   useNavigate,
 } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { Route } from "./+types/import-detail";
 import { requireUserId } from "../core/session.server";
@@ -200,11 +200,43 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
 
     if (intent === "resolve_batch") {
-      const result = resolveImportBatchDuplicates({
-        batchId,
-        resolution,
-        actor,
-      });
+      // Resolve in short transactions and yield between them. A single
+      // all-or-nothing transaction over tens of thousands of duplicates used
+      // to block every other request (and SQLite writer) for minutes.
+      const RESOLVE_CHUNK = 200;
+      const RESOLVE_PER_REQUEST = 1200;
+
+      let processed = 0;
+      let inserted = 0;
+      let remaining = getImportDuplicateStats(batchId).pending;
+
+      if (remaining === 0) {
+        return {
+          success: true,
+          processed: 0,
+          inserted: 0,
+          remaining: 0,
+          message: "该导入没有待处理的重复数据",
+        };
+      }
+
+      while (remaining > 0 && processed < RESOLVE_PER_REQUEST) {
+        const result = resolveImportBatchDuplicates({
+          batchId,
+          resolution,
+          actor,
+          limit: Math.min(RESOLVE_CHUNK, RESOLVE_PER_REQUEST - processed),
+        });
+        processed += result.processed;
+        inserted += result.inserted;
+        remaining = result.remaining;
+
+        if (remaining > 0 && processed < RESOLVE_PER_REQUEST) {
+          // Let pending HTTP requests, page loads and static assets run
+          // between two duplicate-resolution transactions.
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+      }
 
       createAuditLog(
         {
@@ -214,19 +246,25 @@ export async function action({ request, params }: Route.ActionArgs) {
           entity: "导入批次",
           entity_id: batchId.toString(),
           details:
-            resolution === "keep_new"
-              ? `批量保留新数据 ${result.processed} 条，原数据标记为失效`
-              : `批量取消重复导入 ${result.processed} 条`,
+            (resolution === "keep_new"
+              ? `批量保留新数据 ${processed} 条，原数据标记为失效`
+              : `批量取消重复导入 ${processed} 条`) +
+            (remaining > 0 ? `，剩余 ${remaining} 条待继续处理` : ""),
         },
         request
       );
 
       return {
         success: true,
+        processed,
+        inserted,
+        remaining,
         message:
-          resolution === "keep_new"
-            ? `已批量保留 ${result.processed} 条新数据，原数据已标记为失效`
-            : `已批量取消 ${result.processed} 条重复导入`,
+          remaining > 0
+            ? `已处理 ${processed} 条重复数据，剩余 ${remaining} 条，正在继续处理…`
+            : resolution === "keep_new"
+              ? `已批量保留 ${processed} 条新数据，原数据已标记为失效`
+              : `已批量取消 ${processed} 条重复导入`,
       };
     }
   } catch (error) {
@@ -268,7 +306,14 @@ export default function ImportDetailPage({
 }: Route.ComponentProps) {
   const { batch, stats, duplicates, total, page, limit, filters } = loaderData;
   const navigate = useNavigate();
-  const fetcher = useFetcher<{ success?: boolean; message?: string; error?: string }>();
+  const fetcher = useFetcher<{
+    success?: boolean;
+    message?: string;
+    error?: string;
+    remaining?: number;
+    processed?: number;
+  }>();
+  const batchResolutionRef = useRef<Resolution | null>(null);
   const [toast, setToast] = useState<{
     type: "success" | "error";
     message: string;
@@ -277,12 +322,27 @@ export default function ImportDetailPage({
   useEffect(() => {
     if (!fetcher.data) return;
     if (fetcher.data.error) {
+      batchResolutionRef.current = null;
       setToast({ type: "error", message: fetcher.data.error });
     } else if (fetcher.data.success) {
       setToast({
         type: "success",
         message: fetcher.data.message || "处理完成",
       });
+
+      // The action handles a bounded number of rows per request so it can
+      // yield to other traffic; keep going until the batch is fully resolved.
+      if ((fetcher.data.remaining ?? 0) > 0 && batchResolutionRef.current) {
+        fetcher.submit(
+          {
+            intent: "resolve_batch",
+            resolution: batchResolutionRef.current,
+          },
+          { method: "post" }
+        );
+      } else {
+        batchResolutionRef.current = null;
+      }
     }
     const timer = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(timer);
@@ -304,6 +364,20 @@ export default function ImportDetailPage({
         : `确定取消本批次全部 ${count} 条重复导入？原数据保持不变。`;
     if (!window.confirm(message)) {
       event.preventDefault();
+      batchResolutionRef.current = null;
+      return;
+    }
+
+    // Remember which policy the batch form used so the fetcher effect can
+    // automatically continue with the remaining rows.
+    const intent = submitter?.form?.querySelector<HTMLInputElement>(
+      'input[name="intent"]'
+    )?.value;
+    if (
+      intent === "resolve_batch" &&
+      (resolution === "keep_new" || resolution === "cancel")
+    ) {
+      batchResolutionRef.current = resolution;
     }
   };
 

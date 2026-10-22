@@ -65,6 +65,15 @@ export async function action({ request }: Route.ActionArgs) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return Response.json({ error: "No data" }, { status: 400 });
   }
+  // The bundled client sends 500 rows per chunk. Reject oversized chunks so a
+  // custom caller cannot turn one request into a multi-second event-loop block.
+  const maxRowsPerChunk = 1000;
+  if (rows.length > maxRowsPerChunk) {
+    return Response.json(
+      { error: `单个导入分片最多 ${maxRowsPerChunk} 行` },
+      { status: 400 }
+    );
+  }
 
   const rawPolicy = body.duplicatePolicy;
   if (

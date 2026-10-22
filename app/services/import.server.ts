@@ -100,6 +100,23 @@ const BATCH_SELECT = `
   FROM import_batches b
 `;
 
+/**
+ * Batch row without the three resolution counters. The import hot path only
+ * needs status/policy/owner, and recomputing the counters twice per 500-row
+ * chunk made every chunk slower as the batch's duplicate list grew.
+ */
+type ImportBatchCore = Omit<
+  ImportBatch,
+  "pending_count" | "kept_new_count" | "cancelled_count"
+>;
+
+function getImportBatchCoreByToken(token: string): ImportBatchCore | null {
+  const row = db
+    .prepare("SELECT b.* FROM import_batches b WHERE b.batch_token = ?")
+    .get(token) as ImportBatchCore | undefined;
+  return row ?? null;
+}
+
 function formatLocalDateTime(date: Date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return (
@@ -133,24 +150,35 @@ export function getOrCreateImportBatch(input: {
   userName: string;
   totalRows?: number;
   duplicatePolicy?: DuplicatePolicy;
-}): ImportBatch {
+}): ImportBatchCore {
   const token = input.batchToken.trim();
   if (!token) {
     throw new Error("导入批次标识缺失");
   }
 
-  const existing = getImportBatchByToken(token);
+  const existing = getImportBatchCoreByToken(token);
   if (existing) {
     if (existing.user_id !== input.userId) {
       throw new Error("无权操作该导入批次");
     }
-    db.prepare(
-      `UPDATE import_batches
-       SET file_name = COALESCE(NULLIF(?, ''), file_name),
-           total_rows = MAX(total_rows, ?)
-       WHERE id = ?`
-    ).run(input.fileName ?? "", input.totalRows ?? 0, existing.id);
-    return getImportBatchById(existing.id)!;
+
+    // Only write when the metadata actually changed: an unconditional UPDATE
+    // added a second write transaction (and WAL checkpoint) to every chunk.
+    const nextFileName = input.fileName?.trim() || existing.file_name;
+    const nextTotalRows = Math.max(existing.total_rows, input.totalRows ?? 0);
+    if (
+      nextFileName !== existing.file_name ||
+      nextTotalRows !== existing.total_rows
+    ) {
+      db.prepare(
+        `UPDATE import_batches
+         SET file_name = ?, total_rows = ?
+         WHERE id = ?`
+      ).run(nextFileName, nextTotalRows, existing.id);
+      existing.file_name = nextFileName;
+      existing.total_rows = nextTotalRows;
+    }
+    return existing;
   }
 
   // INSERT OR IGNORE + re-read keeps two nearly simultaneous first chunks from
@@ -169,7 +197,7 @@ export function getOrCreateImportBatch(input: {
     input.duplicatePolicy ?? "manual"
   );
 
-  const created = getImportBatchByToken(token);
+  const created = getImportBatchCoreByToken(token);
   if (!created) {
     throw new Error("创建导入批次失败");
   }
@@ -317,6 +345,24 @@ export function importMaterialsChunk(input: ImportChunkInput): ImportChunkResult
             user, usage_time, raw_data, existing_material_id, existing_snapshot)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
+      const markDuplicateResolved = db.prepare(
+        `UPDATE import_duplicates
+         SET resolution = ?,
+             resolved_material_id = ?,
+             resolved_by_id = ?,
+             resolved_by_name = ?,
+             resolved_at = ?
+         WHERE id = ? AND resolution = 'pending'`
+      );
+      const autoResolvedAt = formatLocalDateTime(new Date());
+      // Duplicates handled by an automatic policy. They are applied in bulk
+      // after the row loop instead of running resolveOne() per row.
+      const autoResolutions: {
+        duplicateId: number;
+        accountName: string;
+        resolution: Exclude<DuplicateResolution, "pending">;
+        materialId: number | null;
+      }[] = [];
 
       let count = 0;
       let duplicateCount = 0;
@@ -388,42 +434,56 @@ export function importMaterialsChunk(input: ImportChunkInput): ImportChunkResult
             duplicateAccounts.push(accountName);
           }
 
-          // The administrator may have pre-selected a policy. Apply it right
-          // here, inside the same chunk transaction, so the batch never has to
-          // stop and wait for manual confirmation.
-          if (duplicatePolicy !== "manual") {
-            const duplicateRow = db
-              .prepare("SELECT * FROM import_duplicates WHERE id = ?")
-              .get(Number(duplicateInfo.lastInsertRowid)) as ImportDuplicate;
-            const resolved = resolveOne(
-              duplicateRow,
-              duplicatePolicy,
-              actor
+          // The administrator may have pre-selected a policy. Apply it inside
+          // the same chunk transaction, but queue the work so it can be done
+          // with batched statements after the row loop.
+          if (duplicatePolicy === "keep_new") {
+            // Insert the replacement immediately so later rows of the same
+            // account compare against it within this chunk.
+            const kept = insertMaterial.run(
+              gameName,
+              accountName,
+              description,
+              status,
+              user ?? null,
+              usageTime ?? null
             );
+            const keptId = Number(kept.lastInsertRowid);
 
-            if (resolved.materialId !== null) {
-              autoKeptCount += 1;
-              // Later rows of the same account should now compare against the
-              // freshly kept material, not the one that was just invalidated.
-              references.set(accountName, {
-                materialId: resolved.materialId,
-                snapshot: {
-                  id: resolved.materialId,
-                  game_name: gameName,
-                  account_name: accountName,
-                  description,
-                  status,
-                  user: user ?? null,
-                  usage_time: usageTime ?? null,
-                  created_at: null,
-                  updated_at: null,
-                  source: "import",
-                  row_number: rowNumber,
-                },
-              });
-            } else {
-              autoCancelledCount += 1;
-            }
+            autoResolutions.push({
+              duplicateId: Number(duplicateInfo.lastInsertRowid),
+              accountName,
+              resolution: "keep_new",
+              materialId: keptId,
+            });
+            autoKeptCount += 1;
+
+            // Later rows of the same account should now compare against the
+            // freshly kept material, not the one that will be invalidated.
+            references.set(accountName, {
+              materialId: keptId,
+              snapshot: {
+                id: keptId,
+                game_name: gameName,
+                account_name: accountName,
+                description,
+                status,
+                user: user ?? null,
+                usage_time: usageTime ?? null,
+                created_at: null,
+                updated_at: null,
+                source: "import",
+                row_number: rowNumber,
+              },
+            });
+          } else if (duplicatePolicy === "cancel") {
+            autoResolutions.push({
+              duplicateId: Number(duplicateInfo.lastInsertRowid),
+              accountName,
+              resolution: "cancel",
+              materialId: null,
+            });
+            autoCancelledCount += 1;
           }
           continue;
         }
@@ -454,6 +514,55 @@ export function importMaterialsChunk(input: ImportChunkInput): ImportChunkResult
             row_number: rowNumber,
           },
         });
+      }
+
+      if (autoResolutions.length > 0) {
+        // One indexed UPDATE per 200 accounts replaces one full table scan per
+        // duplicate row. Only the last kept material of an account survives;
+        // earlier rows of this chunk (including freshly inserted ones) are
+        // invalidated, matching the previous per-row behaviour.
+        const lastKeptByAccount = new Map<string, number>();
+        for (const item of autoResolutions) {
+          if (item.resolution === "keep_new" && item.materialId !== null) {
+            lastKeptByAccount.set(item.accountName, item.materialId);
+          }
+        }
+
+        const accounts = [...lastKeptByAccount.keys()];
+        const keptIds = [...lastKeptByAccount.values()];
+        const INVALIDATE_BATCH_SIZE = 200;
+
+        for (
+          let start = 0;
+          start < accounts.length;
+          start += INVALIDATE_BATCH_SIZE
+        ) {
+          const accountSlice = accounts.slice(start, start + INVALIDATE_BATCH_SIZE);
+          const keptSlice = keptIds.slice(start, start + INVALIDATE_BATCH_SIZE);
+          if (accountSlice.length === 0) continue;
+
+          const accountPlaceholders = accountSlice.map(() => "?").join(",");
+          const keptPlaceholders = keptSlice.map(() => "?").join(",");
+
+          db.prepare(
+            `UPDATE materials
+             SET status = '失效', updated_at = CURRENT_TIMESTAMP
+             WHERE account_name IN (${accountPlaceholders})
+               AND status != '失效'
+               AND id NOT IN (${keptPlaceholders})`
+          ).run(...accountSlice, ...keptSlice);
+        }
+
+        for (const item of autoResolutions) {
+          markDuplicateResolved.run(
+            item.resolution,
+            item.materialId,
+            actor.id,
+            actor.name,
+            autoResolvedAt,
+            item.duplicateId
+          );
+        }
       }
 
       db.prepare(
@@ -717,16 +826,22 @@ export function resolveImportBatchDuplicates(input: {
   batchId: number;
   resolution: Exclude<DuplicateResolution, "pending">;
   actor: { id: number; name: string };
+  /** Rows handled per transaction. Kept small so a batch cannot block the
+   * event loop for a long time; the caller pages through the remaining rows. */
+  limit?: number;
 }) {
+  const limit = Math.max(1, Math.min(input.limit ?? 200, 1000));
+
   const run = db.transaction(() => {
     assertBatchReadyForResolution(input.batchId);
     const duplicates = db
       .prepare(
         `SELECT * FROM import_duplicates
          WHERE batch_id = ? AND resolution = 'pending'
-         ORDER BY row_number ASC, id ASC`
+         ORDER BY row_number ASC, id ASC
+         LIMIT ?`
       )
-      .all(input.batchId) as ImportDuplicate[];
+      .all(input.batchId, limit) as ImportDuplicate[];
 
     if (duplicates.length === 0) {
       throw new Error("该导入没有待处理的重复数据");
@@ -738,11 +853,21 @@ export function resolveImportBatchDuplicates(input: {
       if (result.materialId !== null) inserted += 1;
     }
 
+    const remaining = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM import_duplicates
+           WHERE batch_id = ? AND resolution = 'pending'`
+        )
+        .get(input.batchId) as { count: number }
+    ).count;
+
     return {
       batchId: input.batchId,
       processed: duplicates.length,
       inserted,
       cancelled: duplicates.length - inserted,
+      remaining,
     };
   });
   return run.immediate();
